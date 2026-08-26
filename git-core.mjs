@@ -12,7 +12,7 @@
 import { execFile } from "node:child_process";
 import { rm, writeFile, readFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
-import { resolve, sep, dirname } from "node:path";
+import { resolve, join, sep } from "node:path";
 
 // ============================================================================
 // runGit 封装
@@ -90,9 +90,13 @@ export function safeJoin(toplevel, rel) {
   if (resolve(rel) === rel || /^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith("/")) {
     throw new GitError("exit", "非法路径（必须是相对路径）：" + rel);
   }
-  const abs = resolve(toplevel, rel);
-  const norm = toplevel.endsWith(sep) ? toplevel : toplevel + sep;
-  if (abs !== toplevel && !abs.startsWith(norm)) {
+  // 关键：toplevel 先 resolve 归一化。git rev-parse 在 Windows 上输出正斜杠
+  // （如 "D:/repo"），而 resolve() 归一为反斜杠；不归一化就会让下面的
+  // startsWith(root + sep) 永远 false，所有合法路径都被误判越界。
+  const root = resolve(toplevel);
+  const abs = resolve(root, rel);
+  const rootWithSep = root.endsWith(sep) ? root : root + sep;
+  if (abs !== root && !abs.startsWith(rootWithSep)) {
     throw new GitError("exit", "非法路径（越出仓库根目录）：" + rel);
   }
   return abs;
@@ -157,13 +161,18 @@ export async function probeRepo(path) {
     isLinkedWorktree = true;
     try {
       const m = await runGit(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-      mainWorktreePath = m.stdout.trim();
+      // mainWorktreePath 是主 worktree 的工作目录（不是 .git），从 commonDir 反推
+      // 例：commonDir = "D:/repo/.git" → mainWorktreePath = "D:/repo"
+      const absCommon = resolve(path, m.stdout.trim());
+      const parent = absCommon.replace(/[\\/]\.git$/, "");
+      if (parent !== absCommon) mainWorktreePath = parent;
     } catch (_) { /* noop */ }
   }
 
-  // merge / rebase 状态
-  const merging = existsSync(join(gitDir, "MERGE_HEAD"));
-  const rebasing = existsSync(join(gitDir, "rebase-merge")) || existsSync(join(gitDir, "rebase-apply"));
+  // merge / rebase 状态（gitDir 可能是相对路径，先归一化到 cwd）
+  const gitDirAbs = resolve(path, gitDir);
+  const merging = existsSync(join(gitDirAbs, "MERGE_HEAD"));
+  const rebasing = existsSync(join(gitDirAbs, "rebase-merge")) || existsSync(join(gitDirAbs, "rebase-apply"));
 
   return {
     isRepo: true,
@@ -201,6 +210,7 @@ export function parseStatusV2(text) {
     upstream: null,
     ahead: 0,
     behind: 0,
+    unborn: false,
     staged: [],
     unstaged: [],
     untracked: [],
@@ -212,7 +222,12 @@ export function parseStatusV2(text) {
     if (tok.length === 0) continue;
     if (tok.startsWith("# branch.oid ")) {
       const v = tok.slice("# branch.oid ".length).trim();
-      if (v && v !== "(initial)") result.headSha = v;
+      if (v === "(initial)") {
+        result.unborn = true;
+        result.headSha = null;
+      } else if (v) {
+        result.headSha = v;
+      }
     } else if (tok.startsWith("# branch.head ")) {
       const v = tok.slice("# branch.head ".length).trim();
       if (v && v !== "(detached)") result.branch = v;
@@ -223,7 +238,7 @@ export function parseStatusV2(text) {
       const m = tok.slice("# branch.ab ".length).trim().match(/^\+(\d+)\s+-(\d+)/);
       if (m) { result.ahead = Number(m[1]); result.behind = Number(m[2]); }
     } else if (tok.startsWith("1 ") || tok.startsWith("2 ") || tok.startsWith("u ") || tok.startsWith("? ")) {
-      // need to handle two-token path for rename
+      // 第一遍只关心 header
     }
   }
   // 第二遍处理条目（含 rename 的双 token）
@@ -251,10 +266,10 @@ export function parseStatusV2(text) {
       const y = parts[1][1];
       const path = parts.slice(8).join(" ");
       if (x !== "." && x !== "?") {
-        result.staged.push({ path, x, y, kind: mapXY(x, y) });
+        result.staged.push({ path, x, y, kind: mapXYChar(x) });
       }
       if (y !== "." && y !== "?") {
-        result.unstaged.push({ path, x, y, kind: mapXY(x, y) });
+        result.unstaged.push({ path, x, y, kind: mapXYChar(y) });
       }
     } else if (type === "2") {
       const x = parts[1][0];
@@ -279,15 +294,18 @@ export function parseStatusV2(text) {
   return result;
 }
 
-function mapXY(x, y) {
-  // 粗略把 X（index 状态）映射为 kind；仅用于文件操作
-  switch (x) {
+function mapXYChar(c) {
+  // 把 porcelain v2 的单字符 X/Y 映射为 kind：
+  //   M = modified（内容修改）, A = added（新增到 index）, D = deleted（删于 index/工作区）,
+  //   R = renamed, C = copied, T = typechange（文件类型/权限变化）, U = unmerged/conflict
+  switch (c) {
     case "M": return "modified";
     case "A": return "added";
     case "D": return "deleted";
     case "R": return "renamed";
     case "C": return "copied";
     case "T": return "typechange";
+    case "U": return "conflicted";
     default: return "modified";
   }
 }
@@ -457,8 +475,15 @@ export async function getLog(cwd, opts = {}) {
     raw = await runGit(cwd, args);
   } catch (e) {
     if (e instanceof GitError && e.kind === "exit") {
-      // unborn HEAD 或 invalid ref → 返回空
-      return { commits: [], hasMore: false };
+      // 只对 unborn HEAD / unknown revision 这两类"预期无历史"的情况返回空；
+      // 其他错误（如 ref 拼错、被禁用、网络）必须透传，否则 UI 看不出问题。
+      const msg = (e.stderr || e.message || "").toLowerCase();
+      const expectedEmpty = /does not have any commits/.test(msg)
+        || /unknown revision/.test(msg)
+        || /ambiguous argument ['"]?unknown/.test(msg)
+        || /not a git repository/.test(msg);
+      if (expectedEmpty) return { commits: [], hasMore: false };
+      throw e;
     }
     throw e;
   }
@@ -607,19 +632,38 @@ export async function unstageFiles(cwd, files) {
 
 export async function discardFiles(cwd, files, includeUntracked) {
   if (!Array.isArray(files) || files.length === 0) throw new GitError("exit", "discard 需要 files");
-  // 已跟踪：restore --worktree
-  await runGit(cwd, ["restore", "--worktree", "--"].concat(files));
-  if (includeUntracked) {
-    const probe = await probeRepo(cwd);
-    if (!probe.isRepo) throw new GitError("not-a-repo", "discard 未跟踪：仓库不可用");
-    for (const f of files) {
+  const probe = await probeRepo(cwd);
+  if (!probe.isRepo) throw new GitError("not-a-repo", "discard：仓库不可用");
+  // git rev-parse --git-dir 在 cwd=toplevel 时返回相对 ".git"；existsSync 必须
+  // 基于仓库 cwd 解析绝对路径，否则拿 DSH 进程 cwd 去判断 MERGE_HEAD 就废了。
+  const gitDirAbs = resolve(cwd, probe.gitDir);
+
+  // 拆分：未跟踪 vs 已跟踪。git restore 对未跟踪路径直接报 "did not match"，
+  // 把整批操作炸掉 → 必须先分类。
+  const untracked = probe.untracked || [];
+  const untrackedSet = new Set(untracked);
+  const tracked = [];
+  const toDelete = [];
+  for (const f of files) {
+    if (untrackedSet.has(f)) toDelete.push(f);
+    else tracked.push(f);
+  }
+  if (tracked.length > 0) {
+    await runGit(cwd, ["restore", "--worktree", "--"].concat(tracked));
+  }
+  if (includeUntracked && toDelete.length > 0) {
+    for (const f of toDelete) {
       const abs = safeJoin(probe.toplevel, f);
       try {
         await rm(abs, { force: true });
       } catch (_) { /* missing 是正常的 */ }
     }
   }
-  return getStatus(cwd);
+  const status = await getStatus(cwd);
+  // 同时带 merging/rebasing 给客户端（避免 banner 漏掉：见 self-test §4.7.4）
+  status.merging = existsSync(join(gitDirAbs, "MERGE_HEAD"));
+  status.rebasing = existsSync(join(gitDirAbs, "rebase-merge")) || existsSync(join(gitDirAbs, "rebase-apply"));
+  return status;
 }
 
 export async function commitStaged(cwd, message, amend) {
@@ -693,6 +737,17 @@ export async function abortMerge(cwd) {
 }
 
 export async function continueMerge(cwd) {
+  // 守门：MERGE_HEAD 不存在时 `git commit --no-edit` 会提交当前 staged 内容，
+  // 用户误点会得到一个"意外空 commit"——必须先校验。
+  const probe = await probeRepo(cwd);
+  if (!probe.isRepo) throw new GitError("not-a-repo", "continueMerge：仓库不可用");
+  const gitDirAbs = resolve(cwd, probe.gitDir);
+  const inMerge = existsSync(join(gitDirAbs, "MERGE_HEAD"))
+    || existsSync(join(gitDirAbs, "rebase-merge"))
+    || existsSync(join(gitDirAbs, "rebase-apply"));
+  if (!inMerge) {
+    throw new GitError("exit", "当前不在合并/变基中，无可继续的操作");
+  }
   await runGit(cwd, ["commit", "--no-edit"]);
   return getStatus(cwd);
 }
@@ -750,22 +805,33 @@ export async function resolveConflictFile(cwd, file, strategy, content) {
 // 网络：fetch / pull / push
 // ============================================================================
 
+const NET_OUTPUT_TAIL = 4000;
+function tail(s, n) {
+  if (!s) return "";
+  return s.length > n ? s.slice(s.length - n) : s;
+}
+
 export async function fetchRemote(cwd, remote) {
   const args = ["fetch", "--prune"];
   if (remote) args.push(remote);
   let output = "";
+  let err = null;
   try {
     const r = await runGitNet(cwd, args);
-    output = (r.stderr || r.stdout || "").trim();
+    output = tail((r.stdout + r.stderr).trim(), NET_OUTPUT_TAIL);
   } catch (e) {
     if (e instanceof GitError) {
-      output = (e.stderr || e.stdout || "").trim();
-      // fetch 失败仍返回 status（让客户端看到最新状态），但失败信息透传
-      throw Object.assign(new GitError(e.kind, e.message, e), { _output: output });
-    }
-    throw e;
+      err = e;
+      output = tail((e.stdout || "" + (e.stderr || "")).trim(), NET_OUTPUT_TAIL);
+    } else throw e;
   }
   const status = await getStatus(cwd);
+  if (err) {
+    // 把 status 一并附在错误上，让 Host 仍能把 status 推给客户端（不丢上下文）
+    err._status = status;
+    err._output = output;
+    throw err;
+  }
   return { output, status };
 }
 
@@ -775,18 +841,18 @@ export async function pullBranch(cwd, opts = {}) {
   if (opts.remote) args.push(opts.remote);
   if (opts.branch) args.push(opts.branch);
   let output = "";
+  let err = null;
   try {
     const r = await runGitNet(cwd, args);
-    output = (r.stderr || r.stdout || "").trim();
+    output = tail((r.stdout + r.stderr).trim(), NET_OUTPUT_TAIL);
   } catch (e) {
     if (e instanceof GitError) {
-      output = (e.stderr || e.stdout || "").trim();
-      const status = await getStatus(cwd);
-      throw Object.assign(new GitError(e.kind, e.message, e), { _output: output, _status: status });
-    }
-    throw e;
+      err = e;
+      output = tail(((e.stdout || "") + (e.stderr || "")).trim(), NET_OUTPUT_TAIL);
+    } else throw e;
   }
   const status = await getStatus(cwd);
+  if (err) { err._status = status; err._output = output; throw err; }
   return { output, status };
 }
 
@@ -797,18 +863,18 @@ export async function pushBranch(cwd, opts = {}) {
   if (opts.remote) args.push(opts.remote);
   if (opts.branch) args.push(opts.branch);
   let output = "";
+  let err = null;
   try {
     const r = await runGitNet(cwd, args);
-    output = (r.stderr || r.stdout || "").trim();
+    output = tail((r.stdout + r.stderr).trim(), NET_OUTPUT_TAIL);
   } catch (e) {
     if (e instanceof GitError) {
-      output = (e.stderr || e.stdout || "").trim();
-      const status = await getStatus(cwd);
-      throw Object.assign(new GitError(e.kind, e.message, e), { _output: output, _status: status });
-    }
-    throw e;
+      err = e;
+      output = tail(((e.stdout || "") + (e.stderr || "")).trim(), NET_OUTPUT_TAIL);
+    } else throw e;
   }
   const status = await getStatus(cwd);
+  if (err) { err._status = status; err._output = output; throw err; }
   return { output, status };
 }
 
@@ -818,14 +884,20 @@ export async function pushBranch(cwd, opts = {}) {
 
 export async function addWorktree(cwd, worktreePath, newBranch, startPoint) {
   if (!worktreePath) throw new GitError("exit", "worktreeAdd 需要 worktreePath");
+  // git worktree add 语法：worktree add [-b <new>] [--detach] <path> [<commit-ish>]
+  // 关键：<path> 必须是第一个位置参数；detach 是 flag（无值），commit-ish 在 path 之后。
   const args = ["worktree", "add"];
-  if (newBranch) {
-    args.push("-b", newBranch);
-  } else if (startPoint) {
-    args.push("--detach", startPoint);
+  if (newBranch) args.push("-b", newBranch);
+  if (newBranch && startPoint) {
+    // git > 2.30 接受 -b newBranch startPoint 与 -b newBranch startPoint path 两种顺序；统一 path-first
+    args.push(worktreePath, startPoint);
+  } else {
+    args.push(worktreePath);
+    if (startPoint) {
+      // 隐式 detached：把 startPoint 当 commit-ish 加在 path 后面
+      args.push(startPoint);
+    }
   }
-  args.push(worktreePath);
-  if (startPoint && newBranch) args.push(startPoint);
   await runGit(cwd, args);
   return getWorktrees(cwd);
 }

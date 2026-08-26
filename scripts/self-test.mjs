@@ -114,8 +114,11 @@ async function makeRepo(opts = {}) {
 function live(name, fn) {
   test(name, async () => {
     if (!GIT_AVAILABLE) {
-      console.log("[skip-live] " + name + " (git 不可用)");
-      return; // skip silently
+      // 不要把 skip 算成 pass——会让 30 多个 live 测试在无 git 时静默"全绿"。
+      // 用一个共享 skipped 计数，main 里以显眼的方式提示。
+      globalThis.__dshGitSkipped = (globalThis.__dshGitSkipped || 0) + 1;
+      console.log("[skip-live] " + name);
+      return; // 跳过（既不 fail 也不 pass）
     }
     const tmp = await makeRepo();
     try {
@@ -870,6 +873,120 @@ test("addWorktree / removeWorktree / pruneWorktrees 完整链路", async () => {
   }
 });
 
+// ============================================================================
+// Review feedback (Critical/Important) 新增测试
+// ============================================================================
+
+test("safeJoin: 正斜杠 toplevel（Windows git 输出）允许相对路径", () => {
+  const abs = core.safeJoin("D:/ai-projects/dsh/dsh-git-manager", "sub/file.txt");
+  check("含反斜杠或正斜杠分隔的 toplevel 前缀", /^D:[\\/]ai-projects[\\/]dsh[\\/]dsh-git-manager[\\/]sub[\\/]file\.txt$/.test(abs));
+});
+
+test("safeJoin: 绝对路径拒绝", () => {
+  let caught;
+  try { core.safeJoin("D:/repo", "C:/elsewhere/file"); } catch (e) { caught = e; }
+  check("抛 GitError", caught instanceof core.GitError);
+});
+
+test("safeJoin: .. 越界拒绝", () => {
+  let caught;
+  try { core.safeJoin("D:/repo", "../escape"); } catch (e) { caught = e; }
+  check("抛 GitError", caught instanceof core.GitError);
+});
+
+test("safeJoin: \\0 / 空 rel 拒绝", () => {
+  let caught;
+  try { core.safeJoin("D:/repo", ""); } catch (e) { caught = e; }
+  check("抛 GitError", caught instanceof core.GitError);
+});
+
+test("safeJoin: 反斜杠 toplevel 同样正常", () => {
+  const abs = core.safeJoin("D:\\repo\\proj", "src/x.js");
+  check("归一化后含子路径", /src[\\/]x\.js$/.test(abs));
+});
+
+test("parseStatusV2: unborn=true", () => {
+  const fixture = "# branch.oid (initial)\0# branch.head main\0";
+  const r = core.parseStatusV2(fixture);
+  eq("unborn", r.unborn, true);
+  eq("headSha null", r.headSha, null);
+});
+
+test("parseStatusV2: mapXYChar 正确（kind 取自 X 或 Y）", () => {
+  // 修改/删除：X=., Y=D → unstaged kind 应为 deleted（不是 modified）
+  const fixture = "# branch.oid abc" + "\0" + "# branch.head main" + "\0" + "1 .D N... 100644 100644 100644 h h README.md" + "\0";
+  const r = core.parseStatusV2(fixture);
+  eq("unstaged kind", r.unstaged[0].kind, "deleted");
+});
+
+test("discardFiles: 单个未跟踪文件（includeUntracked=true）能删", async () => {
+  if (!GIT_AVAILABLE) return;
+  const tmp = await makeRepo();
+  try {
+    await writeFile(join(tmp, "lonely.txt"), "x\n");
+    const s = await core.discardFiles(tmp, ["lonely.txt"], true);
+    eq("删除", existsSync(join(tmp, "lonely.txt")), false);
+    eq("干净", s.untracked, []);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("getStatus: 合并进行中时 merging=true + banner 数据正确", async () => {
+  if (!GIT_AVAILABLE) return;
+  const tmp = await makeRepo();
+  try {
+    // 建一个会冲突的合并
+    await runShell(tmp, ["git", "checkout", "-b", "feat"]);
+    await writeFile(join(tmp, "README.md"), "feat line\n");
+    await runShell(tmp, ["git", "add", "README.md"]);
+    await runShell(tmp, ["git", "commit", "-m", "f"]);
+    await runShell(tmp, ["git", "checkout", "main"]);
+    await writeFile(join(tmp, "README.md"), "main line\n");
+    await runShell(tmp, ["git", "add", "README.md"]);
+    await runShell(tmp, ["git", "commit", "-m", "m"]);
+    await runShell(tmp, ["git", "merge", "--no-edit", "feat"]);
+    // 此时处于 merge-in-progress
+    const s = await core.getStatus(tmp);
+    eq("merging=true", s.merging, true);
+    eq("rebasing=false", s.rebasing, false);
+    check("conflicted 非空", s.conflicted.length > 0);
+    // 中止恢复
+    await runShell(tmp, ["git", "merge", "--abort"]);
+    const s2 = await core.getStatus(tmp);
+    eq("abort 后 merging=false", s2.merging, false);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("continueMerge: 非合并状态下抛错", async () => {
+  if (!GIT_AVAILABLE) return;
+  const tmp = await makeRepo();
+  try {
+    let caught;
+    try { await core.continueMerge(tmp); } catch (e) { caught = e; }
+    check("抛 GitError", caught instanceof core.GitError);
+    check("message 含提示", /合并|变基|无可继续/.test(caught && caught.message));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("addWorktree: -b newBranch startPoint 顺序正常生成 worktree", async () => {
+  if (!GIT_AVAILABLE) return;
+  const tmp = await makeRepo();
+  try {
+    const wt = join(tmp + "-wtA");
+    await core.addWorktree(tmp, wt, "wtA");
+    const r = await core.getWorktrees(tmp);
+    check("worktree 列表含 wtA 分支", r.worktrees.some((w) => w.branch === "wtA"));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+    if (existsSync(tmp + "-wtA")) await rm(tmp + "-wtA", { recursive: true, force: true });
+  }
+});
+
 test("fetchRemote / pullBranch / pushBranch: 本地 bare remote + real git fetch", async () => {
   if (!GIT_AVAILABLE) return;
   const tmpRoot = await mkdtemp(join(tmpdir(), "dsh-git-remote-"));
@@ -889,6 +1006,7 @@ test("fetchRemote / pullBranch / pushBranch: 本地 bare remote + real git fetch
     // fetch 应该成功
     const r = await core.fetchRemote(work, "origin");
     check("output 字符串", typeof r.output === "string");
+    check("output 不超过 4000 字符", r.output.length <= 4000);
     eq("status 干净", r.status.unstaged.length + r.status.untracked.length, 0);
   } finally {
     await rm(tmpRoot, { recursive: true, force: true });
@@ -901,10 +1019,12 @@ test("fetchRemote / pullBranch / pushBranch: 本地 bare remote + real git fetch
 await run();
 const passed = results.filter((r) => r.ok).length;
 const failed = results.length - passed;
+const skipped = globalThis.__dshGitSkipped || 0;
 console.log("");
 console.log("=== dsh-git-manager self-test ===");
-console.log("passed: " + passed);
-console.log("failed: " + failed);
+console.log("passed:  " + passed);
+console.log("failed:  " + failed);
+console.log("skipped: " + skipped + (skipped > 0 ? " (git 不可用；live 测试未执行 —— 绿不代表 OK)" : ""));
 for (const r of results) {
   const tag = r.ok ? "PASS" : "FAIL";
   const ms = String(r.ms).padStart(3, " ") + "ms";
@@ -919,4 +1039,5 @@ for (const r of results) {
 }
 console.log("");
 
-process.exit(failed === 0 ? 0 : 1);
+// 有 skip 时退出非零——强制调用方注意 live 未跑的情况
+process.exit(failed === 0 && skipped === 0 ? 0 : 1);
