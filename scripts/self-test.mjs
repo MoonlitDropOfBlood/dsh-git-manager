@@ -12,7 +12,7 @@
 
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1010,6 +1010,50 @@ test("fetchRemote / pullBranch / pushBranch: 本地 bare remote + real git fetch
     eq("status 干净", r.status.unstaged.length + r.status.untracked.length, 0);
   } finally {
     await rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// static check：index.js 与 typert.host.js 的 Remote 方法名集合一致
+// ============================================================================
+
+test("static: index.js 与 typert.host.js 方法名集合一致", () => {
+  const indexSrc = readFileSync(join(__projectRoot, "index.js"), "utf8");
+  const typertSrc = readFileSync(join(__projectRoot, "typert.host.js"), "utf8");
+  const extractNames = (src, marker) => {
+    // 从 markRemoteMethod(this, "<name>" 提取
+    if (marker === "index") {
+      const re = /markRemoteMethod\(this,\s*"([a-zA-Z]+)"/g;
+      const out = []; let m; while ((m = re.exec(src))) out.push(m[1]);
+      return out;
+    }
+    // 从 typert 的 METHODS 数组提取
+    if (marker === "typert") {
+      const re = /\[\s*"([a-zA-Z]+)"\s*,\s*\w+Result\s*\]/g;
+      const out = []; let m; while ((m = re.exec(src))) out.push(m[1]);
+      return out;
+    }
+    return [];
+  };
+  const a = extractNames(indexSrc, "index").sort();
+  const b = extractNames(typertSrc, "typert").sort();
+  check("集合大小相同", a.length === b.length, "index=" + a.length + " typert=" + b.length);
+  eq("集合相等", a, b);
+});
+
+test("static: 27 个 Remote 方法在两边都存在", () => {
+  const indexSrc = readFileSync(join(__projectRoot, "index.js"), "utf8");
+  const typertSrc = readFileSync(join(__projectRoot, "typert.host.js"), "utf8");
+  const expected = [
+    "probe","overview","status","diff","log","branches","remotes","worktrees",
+    "conflictContent","stage","unstage","discard","commit","branchCreate",
+    "checkout","branchDelete","branchRename","merge","mergeAbort","mergeContinue",
+    "resolveConflict","fetch","pull","push","worktreeAdd","worktreeRemove",
+    "worktreePrune","init",
+  ];
+  for (const m of expected) {
+    check("index 含 " + m, indexSrc.includes('markRemoteMethod(this, "' + m + '"'));
+    check("typert 含 " + m, typertSrc.includes('"' + m + '"'));
   }
 });
 
