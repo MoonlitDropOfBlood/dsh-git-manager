@@ -113,10 +113,14 @@ dsh plugin --profile web add D:\ai-projects\dsh\dsh-git-manager   # 本地安装
 ## 常规注意事项
 
 - **弹窗层级**：本插件**不**直接用 `shell.overlay` 渲染 DOM——因为该槽宿主在 AppFrame 的 `.overlayLayer`（`position:absolute; z-index:20`）内，子元素 z-index 被 stacking context 锁死，dsh-better-sidebar（z-index:25）会把面板盖住。**修复**：FAB 与全屏面板用 `ReactDOM.createPortal(..., document.body)` 渲染到 body 层（`position:fixed; z-index:1000`），赢过一切页面层。注意 React 树仍属于 `shell.overlay` 槽（props / 生命周期完整），只是 DOM 出口换了。**绝不要**手动 `appendChild` 把 React 管理的 DOM 挪到 body（会偷走 React 节点导致下次调和 NotFoundError）——portal 才是官方逃生口。
+- **路径归一化（review 教训）**：`safeJoin` 接收 `git rev-parse --show-toplevel` 输出的 toplevel；Windows git 输出**正斜杠**（如 `D:/repo`），而 `node:path.resolve` 归一为**反斜杠**（`D:\repo`）。如果直接 `startsWith(toplevel + sep)` 会永远 false，所有合法路径被误判越界。正确做法：`const root = resolve(toplevel)`，再用 `startsWith(root + sep)`。
+- **MERGE_HEAD 路径（review 教训）**：`git rev-parse --git-dir` 在 cwd=toplevel 时返回相对路径 `.git`；`existsSync(join(gitDir, "MERGE_HEAD"))` 必须先 `resolve(cwd, gitDir)` 归一化到绝对路径，否则 MERGE_HEAD 检测落到 DSH 进程 cwd 上、永远 false，合并进行中 banner 不会出现。
+- **continueMerge 守门**：MERGE_HEAD / rebase-merge / rebase-apply 任一不存在时**必须抛错**——否则 `git commit --no-edit` 会提交 staged 内容，得到一个意外的"空 commit"。`git-core.mjs:continueMerge` 已加守卫。
 - **不要直接编辑 `~/.dsh/profiles/web/cordis.yml`**（生成文件，patch 覆盖在 `cordis.patch.yml`）。
 - `cordis.patch.yml` 顶层是 patch 数组：`- insert:` 新增、`- id:` 覆盖。
 - `client.js` 用 `require("react")` 与 `require("react-dom")`（bundle 模块表提供），**不要** `import`；不用动态插件的 styles/host 全局。
 - 组件类型全部 bundle 作用域定义一次（内联创建会导致 React 每次 remount 丢输入态）。
 - typert result schema 是 strict：Host 返回结构与 schema 逐字段一致。
 - 危险操作全部 UI 二次确认；force push 只用 `--force-with-lease`。
+- **skip-live 不算 PASS**：`scripts/self-test.mjs` 在 git 不可用时跳过 live 测试并以 exit 1 退出——把"绿"误读为通过会让静默跳过的 bug 上线。CI 跑测试必须用真实 git。
 - 发布 npm 必须 `--registry=https://registry.npmjs.org`（本机默认 registry 被 npmmirror 覆盖）。

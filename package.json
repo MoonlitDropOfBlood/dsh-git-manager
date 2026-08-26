@@ -25,7 +25,9 @@
     "typert.host.js",
     "git-core.mjs",
     "git-graph.mjs",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "scripts/self-test.mjs",
+    ".github"
   ],
   "license": "MIT",
   "dsh": {
