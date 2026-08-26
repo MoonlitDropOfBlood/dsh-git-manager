@@ -1,0 +1,50 @@
+{
+  "name": "@duke-dsh-plugins/dsh-git-manager",
+  "version": "1.0.0",
+  "description": "DSH 正式 bundle 插件：在 DSH Web UI 里管理 Git 工作区——未开会话时右下角悬浮按钮（FAB）、会话内头部分支徽章入口，进入全屏面板覆盖 git status/diff、分支管理、合并冲突解决、commit/fetch/pull/push、worktree 管理、带分支线图形的提交历史。",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MoonlitDropOfBlood/dsh-git-manager.git"
+  },
+  "homepage": "https://github.com/MoonlitDropOfBlood/dsh-git-manager",
+  "bugs": { "url": "https://github.com/MoonlitDropOfBlood/dsh-git-manager/issues" },
+  "publishConfig": { "access": "public" },
+  "keywords": ["dsh", "deepseek-harness", "plugin", "git", "worktree"],
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./typert": "./typert.host.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "typert.host.js",
+    "git-core.mjs",
+    "git-graph.mjs",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.7"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "scripts": {
+    "check": "node --check index.js && node --check client.js && node --check typert.host.js && node --check git-core.mjs && node --check git-graph.mjs && node --check scripts/self-test.mjs",
+    "test": "node scripts/self-test.mjs"
+  }
+}
