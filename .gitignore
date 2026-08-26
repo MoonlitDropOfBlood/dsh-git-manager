@@ -7,3 +7,5 @@ node_modules/
 .vscode/
 *.tgz
 dist/
+package-lock.json
+.npm-cache/
