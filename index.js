@@ -53,8 +53,8 @@ import {
   removeWorktree,
   pruneWorktrees,
   initRepo,
-  computeGraph,
 } from "./git-core.mjs";
+import { computeGraph } from "./git-graph.mjs";
 
 // Node ESM 不支持 Stage 3 装饰器，手动驱动 Remote() 装饰器。
 function markRemoteMethod(instance, method, exportName) {

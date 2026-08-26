@@ -1057,6 +1057,37 @@ test("static: 27 个 Remote 方法在两边都存在", () => {
   }
 });
 
+test("static: index.js 的 import source 与 git-core.mjs 实际 export 一致", () => {
+  // 启动期坑：把不属于 git-core 的 export（如 computeGraph）写进它的 import 列表，
+  // 第一次启动 DSH 时会 ERR_MODULE_NOT_FOUND，整个进程起不来；self-test 不跑 index.js 不会发现。
+  const coreSrc = readFileSync(join(__projectRoot, "git-core.mjs"), "utf8");
+  const graphSrc = readFileSync(join(__projectRoot, "git-graph.mjs"), "utf8");
+  const indexSrc = readFileSync(join(__projectRoot, "index.js"), "utf8");
+  // 收集每个模块真实 export 的 named identifiers
+  const exportsOf = (src) => {
+    const re = /export\s+(?:async\s+)?(?:function|const|class)\s+([a-zA-Z_$][\w$]*)/g;
+    const out = new Set(); let m; while ((m = re.exec(src))) out.add(m[1]);
+    return out;
+  };
+  const coreExports = exportsOf(coreSrc);
+  const graphExports = exportsOf(graphSrc);
+  // 收集 index.js 的 from "./git-core.mjs" import 列表
+  const m = indexSrc.match(/import\s*\{([^}]+)\}\s*from\s*"\.\/git-core\.mjs"/);
+  check("找到 git-core.mjs 的 import 块", !!m);
+  const importedFromCore = new Set();
+  for (const x of m[1].split(",")) {
+    const t = x.trim();
+    if (t) importedFromCore.add(t);
+  }
+  for (const name of importedFromCore) {
+    check("git-core.mjs 实际 export '" + name + "'（index.js 启动时不抛 ERR_MODULE_NOT_FOUND）", coreExports.has(name));
+  }
+  // computeGraph 必须在 git-graph.mjs
+  check("computeGraph 在 git-graph.mjs", graphExports.has("computeGraph"));
+  // index.js 不能从 git-core 导入 computeGraph
+  check("index.js 不从 git-core 导入 computeGraph", !importedFromCore.has("computeGraph"));
+});
+
 // ============================================================================
 // main -----------------------------------------------------------------
 
