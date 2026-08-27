@@ -200,13 +200,29 @@ window.__ModuleLoader__.load({
     }
 
     // ---- Header badge ----
-    // 仅在 session 作用域内渲染；接受 props.useSessions（来自 framework session kit）
+    // 注册在 conversation.session.header.actions（session 作用域）。该槽的 owner props 是空对象
+    // {}（render 侧 renderSlot("conversation.session.header.actions", {})），但 framework 会给
+    // 每个 session-scope 槽注入标准 kit：sessionId + useSession + useProjection（见
+    // dsh-client-runtime SessionStandardProps）。注意：这里【没有】useSessions / useWorkspaces
+    // （那是 root-scope 槽才有的）。所以用 props.sessionId + ctx.sessions.list 拿 cwd。
     function HeaderGitBadge(props) {
-      // session-kit 注入（见 conversation.session.header.actions slot 契约）
-      // 此处 props 可能含 sessionId / cwd；保守做法是直接从 sessions store 读
-      const useSessions = props && props.useSessions;
-      const current = useSessions ? useSessions((s) => s.current) : undefined;
-      const cwd = useSessions ? useSessions((s) => (s.current && s.byId[s.current] ? s.byId[s.current].cwd : null)) : null;
+      const sessions = props && props.sessions;
+      // 订阅 ctx.sessions.list（ObservableSnapshot: getSnapshot + subscribe）取当前 summary
+      let list = { byId: {}, current: undefined };
+      if (sessions && sessions.list) {
+        try {
+          list = React.useSyncExternalStore(
+            sessions.list.subscribe.bind(sessions.list),
+            () => sessions.list.getSnapshot() || list,
+          );
+        } catch (e) {
+          list = { byId: {}, current: undefined };
+        }
+      }
+      // sessionId 优先级：framework kit 显式传的 props.sessionId > list.current（兜底）
+      const sessionId = (props && props.sessionId) || (list && list.current);
+      const summary = (sessionId && list.byId) ? list.byId[sessionId] : undefined;
+      const cwd = (summary && summary.cwd) || null;
       const [probe, setProbe] = React.useState(null);
       const [overview, setOverview] = React.useState(null);
       const [tick, setTick] = React.useState(0);
@@ -233,7 +249,6 @@ window.__ModuleLoader__.load({
       }, [cwd, tick]);
 
       if (!probe || probe.isRepo === false) return null;
-      if (!current) return null;
 
       const branchLabel = probe.detached
         ? (probe.headShort || "detached")
@@ -1046,6 +1061,10 @@ window.__ModuleLoader__.load({
     async function apply(ctx) {
       await ctx.remote.$mount(CLIENT_REMOTE);
 
+      // 诊断冒烟：若浏览器控制台出现这行，说明 client bundle 已加载并进入 apply。
+      // 找不到入口时先看这行在不在，区分"bundle 没加载" vs "槽位/组件 bug"。
+      try { console.log("[dsh-git-manager] client apply() ran, mounting UI"); } catch (_) { /* noop */ }
+
       // 样式注入（动态 HMR 不可用，正式插件的样式走手动 style 标签）
       const styleTag = document.createElement("style");
       styleTag.textContent = CSS;
@@ -1056,9 +1075,16 @@ window.__ModuleLoader__.load({
       const remote = ctx.get("remote.gitManager");
 
       // ① 头部徽章（session 作用域）
+      // 槽位渲染时 owner props 是空对象 {}，framework 注入 session kit
+      // （sessionId / useSession），不含 sessions 服务——这里用稳定 wrapper 把
+      // ctx.sessions 塞进去（wrapper 定义在 apply 内、只执行一次，身份稳定）。
+      const sessions = ctx.get("sessions");
+      function HeaderGitBadgeSlot(props) {
+        return React.createElement(HeaderGitBadge, Object.assign({}, props, { sessions }));
+      }
       ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register(
         { name: "conversation.session.header.actions", id: "git-manager", order: 100, label: () => "Git" },
-        HeaderGitBadge,
+        HeaderGitBadgeSlot,
       ));
 
       // ② shell.overlay 注册：根据面板状态 + 会话状态渲染 FAB 或 Panel
@@ -1078,9 +1104,22 @@ window.__ModuleLoader__.load({
               document.body,
             );
           }
-          // 关闭状态：FAB 仅在无 current 会话时显示（hero 视图）。会话开启后头部徽章接管。
-          const current = props.useSessions ? props.useSessions((s) => s.current) : undefined;
-          if (current) return null;
+          // 关闭状态：FAB 仅在无 current 会话或当前为 blank（hero 视图）时显示。
+          // 会话开启（有内容）后头部徽章接管，FAB 消失。
+          let showFab = false;
+          if (props.useSessions) {
+            const current = props.useSessions((s) => s.current);
+            if (!current) {
+              showFab = true;
+            } else {
+              const blank = props.useSessions((s) => (s.current && s.byId[s.current] ? s.byId[s.current].blank === true : false));
+              if (blank) showFab = true;
+            }
+          } else {
+            // 拿不到 useSessions（理论上 root 槽必有）：保守显示 FAB，避免无入口
+            showFab = true;
+          }
+          if (!showFab) return null;
           return ReactDOM.createPortal(
             React.createElement(GitFab, { onClick: () => setOpen(true, undefined) }),
             document.body,
