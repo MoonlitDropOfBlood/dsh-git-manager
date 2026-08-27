@@ -1,22 +1,21 @@
 /**
  * dsh-git-manager — Typert Host manifest.
  *
- * 手写 TYPERT manifest（dsh typert-loader 从包的 `./typert` 导出加载）。
- * 描述 `gitManager` Remote 服务 27 个方法的 wire schema，让浏览器 Client 端
- * `ctx.remote.gitManager.<method>()` 可用（Client 端用 passthrough codec，
- * 这里 schema 仅供 Host 侧严格校验）。
+ * 手写 TYPERT manifest（dsh-typert-loader 从包的 `./typert` 导出加载）。
+ * 必须导出名为 `TYPERT` 的 manifest 对象（loader 的 validateTypertManifest 校验），
+ * 形状与 memory-manager / archive-manager 的手写 manifest 一致：
+ *   { package, face: "host", schemas: [], invocations: [...], model: {services:[...]}, events: [], objects: [] }
+ *
+ * 每个 invocation：{ id, service, namespace, method, invocation:{kind:"direct"},
+ *   parameters:[{name, wire, source, codec:{mode:"strict", typeSymbol, schema}}],
+ *   result:{mode:"strict", typeSymbol, schema} }
  *
  * 与 index.js (GitManagerService) 和 client.js 的关键名字一致：
  *   - 服务键 / 类名：gitManager / GitManagerService
  *   - invocation id：dsh-git-manager#gitManager/<method>
- *   - result schema 都是 z.union([ok=true+value, ok=false+error])，strict。
- *
- * 不导出任何值，只通过 `model.services` 让 loader 读到。
  */
 
 import { z } from "zod";
-
-const id = (m, kind) => "dsh-git-manager#GitManager" + m + kind;
 
 // ---- shared schemas -------------------------------------------------------
 
@@ -30,7 +29,7 @@ const fileEntrySchema = z.object({
   oldPath: z.string().readonly().optional(),
   x: z.string().readonly().optional(),
   y: z.string().readonly().optional(),
-  kind: z.string().readonly(), // modified|added|deleted|renamed|copied|typechange|conflicted
+  kind: z.string().readonly(),
 }).readonly();
 
 const conflictEntrySchema = z.object({
@@ -70,7 +69,7 @@ const graphSchema = z.object({
     toRow: z.number().readonly().nullable(),
     toCol: z.number().readonly(),
     color: z.number().readonly(),
-    kind: z.string().readonly(), // parent|merge|collapse
+    kind: z.string().readonly(),
   }).readonly()).readonly(),
   laneCount: z.number().readonly(),
 }).readonly();
@@ -153,7 +152,6 @@ const diffValueSchema = z.object({
 }).readonly();
 
 const statusOnlySchema = z.object({ status: statusSchema }).readonly();
-const worktreesOnlySchema = z.object({ worktrees: z.array(worktreeSchema).readonly() }).readonly();
 const commitValueSchema = z.object({
   commit: z.string().readonly(),
   status: statusSchema,
@@ -162,14 +160,10 @@ const mergeValueSchema = z.object({
   merged: z.boolean().readonly(),
   status: statusSchema,
 }).readonly();
-
-// 网络操作可附带 status（失败时附 _status + _output 映射到 envelope）
 const fetchValueSchema = z.object({
   output: z.string().readonly(),
   status: statusSchema,
 }).readonly();
-
-// ---- per-method result schemas ------------------------------------------
 
 function result(valueSchema) {
   return z.union([
@@ -178,7 +172,6 @@ function result(valueSchema) {
   ]).readonly();
 }
 
-// 网络操作失败时 envelope 额外带 output + status
 function netResult(valueSchema) {
   return z.union([
     z.object({ ok: z.literal(true).readonly(), value: valueSchema }).readonly(),
@@ -191,50 +184,29 @@ function netResult(valueSchema) {
   ]).readonly();
 }
 
-// 1. probe
+// ---- per-method result schemas ------------------------------------------
+
 const probeResult = result(probeSchema);
-// 2. overview（特殊：isRepo=false 时 value.probe={isRepo:false}）
 const overviewResult = result(z.object({
   probe: probeSchema,
   status: statusSchema.nullable(),
   remotes: z.array(remoteSchema).readonly(),
 }).readonly());
-// 3. status
 const statusResult = result(statusSchema);
-// 4. diff
 const diffResult = result(diffValueSchema);
-// 5. log
 const logResult = result(logValueSchema);
-// 6. branches
 const branchesResult = result(branchesValueSchema);
-// 7. remotes
 const remotesResult = result(z.array(remoteSchema).readonly());
-// 8. worktrees
 const worktreesResult = result(worktreesValueSchema);
-// 9. conflictContent
 const conflictContentResult = result(conflictContentValueSchema);
-// 10. stage / 11. unstage / 12. discard
 const mutationResult = result(statusOnlySchema);
-// 13. commit
 const commitResult = result(commitValueSchema);
-// 14-17. branchCreate / checkout / branchDelete / branchRename
-const branchMutResult = result(statusOnlySchema);
-// 18. merge
 const mergeResult = result(mergeValueSchema);
-// 19. mergeAbort / 20. mergeContinue
-const abortContinueResult = result(statusOnlySchema);
-// 21. resolveConflict
-const resolveConflictResult = result(statusOnlySchema);
-// 22. fetch / 23. pull / 24. push
 const fetchResult = netResult(fetchValueSchema);
-const pullResult = netResult(fetchValueSchema);
-const pushResult = netResult(fetchValueSchema);
-// 25. worktreeAdd / 26. worktreeRemove / 27. worktreePrune
-const worktreeMutResult = result(worktreesOnlySchema);
-// 28. init
+const worktreeMutResult = result(worktreesValueSchema);
 const initResult = result(z.object({ probe: probeSchema }).readonly());
 
-// ---- invocation list ------------------------------------------------------
+// ---- manifest ------------------------------------------------------------
 
 const METHODS = [
   ["probe", probeResult],
@@ -250,46 +222,83 @@ const METHODS = [
   ["unstage", mutationResult],
   ["discard", mutationResult],
   ["commit", commitResult],
-  ["branchCreate", branchMutResult],
-  ["checkout", branchMutResult],
-  ["branchDelete", branchMutResult],
-  ["branchRename", branchMutResult],
+  ["branchCreate", mutationResult],
+  ["checkout", mutationResult],
+  ["branchDelete", mutationResult],
+  ["branchRename", mutationResult],
   ["merge", mergeResult],
-  ["mergeAbort", abortContinueResult],
-  ["mergeContinue", abortContinueResult],
-  ["resolveConflict", resolveConflictResult],
+  ["mergeAbort", mutationResult],
+  ["mergeContinue", mutationResult],
+  ["resolveConflict", mutationResult],
   ["fetch", fetchResult],
-  ["pull", pullResult],
-  ["push", pushResult],
+  ["pull", fetchResult],
+  ["push", fetchResult],
   ["worktreeAdd", worktreeMutResult],
   ["worktreeRemove", worktreeMutResult],
   ["worktreePrune", worktreeMutResult],
   ["init", initResult],
 ];
 
-// ---- export ---------------------------------------------------------------
-
-// loader 期望的最小形状：model.services[].{ key, exportName, invocations[] }
-// 详细 shape 由 typert-loader 文档定义；这里给出 archive-manager / memory-manager
-// 验证可行的最小子集。
-export const model = {
-  services: [
-    {
-      key: "gitManager",
-      exportName: "GitManagerService",
-      invocations: METHODS.map(([method, resultSchema]) => ({
-        method,
-        invocationId: "dsh-git-manager#gitManager/" + method,
-        parameters: [{ name: "request", wire: "request", source: "json" }],
-        result: { schema: resultSchema, typeSymbol: id(method, "Result") },
-      })),
+function invocationOf(method, resultSchema) {
+  return {
+    id: "dsh-git-manager#gitManager/" + method,
+    service: "gitManager",
+    namespace: "gitManager",
+    method,
+    invocation: { kind: "direct" },
+    parameters: [
+      {
+        name: "request",
+        wire: "request",
+        source: "json",
+        codec: {
+          mode: "strict",
+          typeSymbol: "dsh-git-manager#GitManager" + method + "Request",
+          schema: z.object({}).passthrough(),
+        },
+      },
+    ],
+    result: {
+      mode: "strict",
+      typeSymbol: "dsh-git-manager#GitManager" + method + "Result",
+      schema: resultSchema,
     },
-  ],
+    sourceLocation: { file: "index.js", line: 1, column: 1 },
+  };
+}
+
+// service members（Remote 方法）与 types 用生成器构造，与 invocations 同源
+function serviceMemberOf(method) {
+  return {
+    kind: "method",
+    name: method,
+    signature: "@Remote('" + method + "') async " + method + "(request: GitManager" + method + "Request): Promise<GitManager" + method + "Result>",
+    summary: "gitManager." + method + "() — see index.js.",
+    jsDoc: "/**\n * gitManager." + method + "()\n * @param request - the request payload.\n * @returns the result envelope.\n */",
+  };
+}
+
+export const TYPERT = {
+  package: "@duke-dsh-plugins/dsh-git-manager",
+  face: "host",
+  schemas: [],
+  invocations: METHODS.map(([m, r]) => invocationOf(m, r)),
+  model: {
+    services: [
+      {
+        description: "Git workspace management service: probe, status, diff, branches, log (with branch graph), conflicts, worktrees, and commit/fetch/pull/push.",
+        summary: "Git workspace management service.",
+        tags: [],
+        jsDoc: "/**\n * Git workspace management service.\n */",
+        key: "gitManager",
+        exportName: "GitManagerService",
+        members: METHODS.map(([m]) => serviceMemberOf(m)),
+        types: [],
+      },
+    ],
+    events: [],
+    objects: [],
+  },
 };
 
-// 也暴露直接的 invocations 给可能用到的 loader 形态
-export const invocations = METHODS.map(([method, resultSchema]) => ({
-  method,
-  invocationId: "dsh-git-manager#gitManager/" + method,
-  result: { schema: resultSchema, typeSymbol: id(method, "Result") },
-}));
+export default TYPERT;

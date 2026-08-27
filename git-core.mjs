@@ -140,6 +140,14 @@ export async function probeRepo(path) {
   try {
     const sym = await runGit(path, ["symbolic-ref", "--short", "-q", "HEAD"]);
     branch = sym.stdout.trim() || null;
+    // symbolic-ref 成功 ≠ HEAD 存在：unborn 分支（init 后无 commit）同样返回
+    // refs/heads/<name>。必须再用 rev-parse 验证 HEAD 可解析。
+    try {
+      const ver = await runGit(path, ["rev-parse", "--short=12", "HEAD"]);
+      headShort = ver.stdout.trim();
+    } catch (_) {
+      unborn = true;
+    }
   } catch (e) {
     if (e instanceof GitError && e.kind === "exit") {
       detached = true;
@@ -317,13 +325,16 @@ function mapXYChar(c) {
 export async function getStatus(cwd) {
   const raw = await runGit(cwd, ["status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z"]);
   const parsed = parseStatusV2(raw.stdout);
-  // 用 probeRepo 拿到 gitDir 判断 merging/rebasing
+  // 用 probeRepo 拿到 gitDir 判断 merging/rebasing。
+  // gitDir 可能是相对路径（cwd=toplevel 时返回 ".git"）——必须 resolve(cwd, gitDir)
+  // 归一化到仓库，否则 join(".git", ...) 相对到 DSH 进程 cwd，merging 永远 false。
   let merging = false, rebasing = false;
   try {
     const probe = await probeRepo(cwd);
     if (probe.isRepo && probe.gitDir) {
-      merging = existsSync(join(probe.gitDir, "MERGE_HEAD"));
-      rebasing = existsSync(join(probe.gitDir, "rebase-merge")) || existsSync(join(probe.gitDir, "rebase-apply"));
+      const gitDirAbs = resolve(cwd, probe.gitDir);
+      merging = existsSync(join(gitDirAbs, "MERGE_HEAD"));
+      rebasing = existsSync(join(gitDirAbs, "rebase-merge")) || existsSync(join(gitDirAbs, "rebase-apply"));
     }
   } catch (_) { /* noop */ }
   return Object.assign({}, parsed, { merging, rebasing });
@@ -638,10 +649,14 @@ export async function discardFiles(cwd, files, includeUntracked) {
   // 基于仓库 cwd 解析绝对路径，否则拿 DSH 进程 cwd 去判断 MERGE_HEAD 就废了。
   const gitDirAbs = resolve(cwd, probe.gitDir);
 
+  // 防护前置：先校验所有请求路径都在仓库根内（拒绝绝对路径与 .. 越界），
+  // 再做任何破坏性动作。
+  for (const f of files) safeJoin(probe.toplevel, f);
+
   // 拆分：未跟踪 vs 已跟踪。git restore 对未跟踪路径直接报 "did not match"，
-  // 把整批操作炸掉 → 必须先分类。
-  const untracked = probe.untracked || [];
-  const untrackedSet = new Set(untracked);
+  // 把整批操作炸掉 → 必须先分类。未跟踪清单来自 status（probeRepo 不含 status）。
+  const st = await getStatus(cwd);
+  const untrackedSet = new Set(st.untracked || []);
   const tracked = [];
   const toDelete = [];
   for (const f of files) {

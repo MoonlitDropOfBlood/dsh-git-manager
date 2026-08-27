@@ -188,7 +188,9 @@ test("probeRepo: 普通仓库返回完整 probe", async () => {
     eq("merging", p.merging, false);
     eq("rebasing", p.rebasing, false);
     eq("isLinkedWorktree", p.isLinkedWorktree, false);
-    check("toplevel 等于 tmp", p.toplevel === tmp || p.toplevel.toLowerCase() === tmp.toLowerCase());
+    // git 在 Windows 上返回正斜杠 toplevel；normalize 后再比
+    const norm = (s) => String(s).replace(/\//g, "\\").toLowerCase();
+    check("toplevel 等于 tmp（路径归一化后）", norm(p.toplevel) === norm(tmp) || norm(p.toplevel) === norm(tmp) + "\\", "toplevel=" + p.toplevel + " tmp=" + tmp);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
@@ -327,18 +329,23 @@ test("getStatus: 修改/新增/删除/未跟踪 完整链路", async () => {
   if (!GIT_AVAILABLE) return;
   const tmp = await makeRepo();
   try {
-    // 修改 README.md
+    // 先提交一个 a.txt（后续制造它的删除）；注意要在 staged.txt 之前提交，
+    // 否则 git commit 会把 staged.txt 一起带走
+    await writeFile(join(tmp, "a.txt"), "alpha\n");
+    await runShell(tmp, ["git", "add", "a.txt"]);
+    await runShell(tmp, ["git", "commit", "-m", "add a"]);
+    // 修改 README.md（unstaged）
     await writeFile(join(tmp, "README.md"), "# updated\n");
-    // 新增 + stage
+    // 新增 + stage（staged added）
     await writeFile(join(tmp, "staged.txt"), "s\n");
     await runShell(tmp, ["git", "add", "staged.txt"]);
-    // 删除 + stage
+    // 删除 + stage（staged deleted）
     await runShell(tmp, ["git", "rm", "a.txt"]);
     // 未跟踪
     await writeFile(join(tmp, "new.txt"), "n\n");
 
     const s = await core.getStatus(tmp);
-    check("staged 含修改", s.unstaged.some((e) => e.path === "README.md" && e.kind === "modified"));
+    check("unstaged 含修改", s.unstaged.some((e) => e.path === "README.md" && e.kind === "modified"));
     check("staged 含新增 staged.txt", s.staged.some((e) => e.path === "staged.txt" && e.kind === "added"));
     check("staged 含删除 a.txt", s.staged.some((e) => e.path === "a.txt" && e.kind === "deleted"));
     eq("untracked", s.untracked, ["new.txt"]);
@@ -528,7 +535,8 @@ test("integration: real 合并历史的 getLog + computeGraph 路径", async () 
 
     const log = await core.getLog(tmp, { all: true, maxCount: 100 });
     const g = computeGraph(log.commits);
-    eq("getLog 5 个提交", log.commits.length, 5);
+    // initial + feature + main + merge = 4
+    eq("getLog 4 个提交", log.commits.length, 4);
     check("laneCount >= 2", g.laneCount >= 2, "actual=" + g.laneCount);
     check("至少一个 merge link", g.links.some((l) => l.kind === "merge"), "links=" + JSON.stringify(g.links));
   } finally {
@@ -625,7 +633,8 @@ test("getDiff: commit 范围 scope=commit 含 message header", async () => {
   const tmp = await makeRepo({ withSecondCommit: true });
   try {
     const log = await runShell(tmp, ["git", "log", "--format=%H"]);
-    const sha = log.stdout.trim().split("\n")[1]; // 第二个 = add a
+    const sha = log.stdout.trim().split("\n")[0]; // 第 0 个 = 最新提交 = "add a"（含 +alpha）
+    check("拿到 add a 的提交", !!sha);
     const r = await core.getDiff(tmp, { scope: "commit", sha });
     check("含 commit header", /Author|Date/.test(r.text));
     check("含 +alpha", r.text.includes("+alpha"));
@@ -663,8 +672,8 @@ test("discardFiles: 已跟踪 restore + 未跟踪删除 + 路径防护", async (
     await writeFile(join(tmp, "README.md"), "# polluted\n");
     await writeFile(join(tmp, "junk.txt"), "junk\n");
     const s = await core.discardFiles(tmp, ["README.md", "junk.txt"], true);
-    const after = await readFile(join(tmp, "README.md"), "utf8");
-    eq("README 恢复", after, "# init\n");
+    const after = (await readFile(join(tmp, "README.md"), "utf8")).replace(/\r\n/g, "\n");
+    eq("README 恢复（autocrlf 环境容忍 CRLF）", after, "# init\n");
     eq("junk.txt 已删除", existsSync(join(tmp, "junk.txt")), false);
     eq("干净", s.staged.length + s.unstaged.length + s.untracked.length, 0);
   } finally {
@@ -795,6 +804,10 @@ test("getConflictContent: ours/theirs/base/worktree 全字段", async () => {
   if (!GIT_AVAILABLE) return;
   const tmp = await makeRepo();
   try {
+    // 初始提交就含 X.txt，这样合并冲突才有 base（stage 1）
+    await writeFile(join(tmp, "X.txt"), "init-base\n");
+    await runShell(tmp, ["git", "add", "X.txt"]);
+    await runShell(tmp, ["git", "commit", "-m", "add X base"]);
     await runShell(tmp, ["git", "checkout", "-b", "feat"]);
     await writeFile(join(tmp, "X.txt"), "from-feat\n");
     await runShell(tmp, ["git", "add", "X.txt"]);
@@ -807,7 +820,7 @@ test("getConflictContent: ours/theirs/base/worktree 全字段", async () => {
     const c = await core.getConflictContent(tmp, "X.txt");
     check("ours 含 from-main", c.ours && c.ours.includes("from-main"));
     check("theirs 含 from-feat", c.theirs && c.theirs.includes("from-feat"));
-    check("base 含 init", c.base && c.base.includes("init"));
+    check("base 含 init-base", c.base && c.base.includes("init-base"));
     check("worktree 含冲突标记", /<<<<<</.test(c.worktree || ""));
   } finally {
     await rm(tmp, { recursive: true, force: true });
@@ -945,7 +958,10 @@ test("getStatus: 合并进行中时 merging=true + banner 数据正确", async (
     await writeFile(join(tmp, "README.md"), "main line\n");
     await runShell(tmp, ["git", "add", "README.md"]);
     await runShell(tmp, ["git", "commit", "-m", "m"]);
-    await runShell(tmp, ["git", "merge", "--no-edit", "feat"]);
+    // 合并必然冲突退出非零 → runShell 会 reject，捕获即可（冲突是预期）
+    try {
+      await runShell(tmp, ["git", "merge", "--no-edit", "feat"]);
+    } catch (_) { /* conflict expected */ }
     // 此时处于 merge-in-progress
     const s = await core.getStatus(tmp);
     eq("merging=true", s.merging, true);

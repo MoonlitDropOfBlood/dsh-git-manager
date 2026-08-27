@@ -24,6 +24,10 @@ import { statSync } from "node:fs";
 import { Remote, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import { Service } from "@deepseek-ai/cordis";
 
+// 诊断冒烟：loader import 本 entry 时必然执行。若 boot 日志没有这行，
+// 说明 entry 根本没被 import（组合树/加载层问题），而非模块代码错误。
+try { console.error("[dsh-git-manager] index.js module body executed"); } catch (_) { /* noop */ }
+
 import {
   GitError,
   probeRepo,
@@ -330,3 +334,9 @@ export class GitManagerService extends TypertRemoteService {
     } catch (e) { return { ok: false, error: mapGitError(e) }; }
   }
 }
+
+// cordis loader 的 unwrapExports 取 `exports.default ?? exports`：ESM 命名空间
+// 对象不是合法 plugin（报 "invalid plugin, expect function or object with an
+// apply method, received object"）。必须 default 导出 Service 类——
+// memory-manager / archive-manager 同款，方案文档此前漏掉了这一行。
+export default GitManagerService;
