@@ -1104,22 +1104,10 @@ window.__ModuleLoader__.load({
               document.body,
             );
           }
-          // 关闭状态：FAB 仅在无 current 会话或当前为 blank（hero 视图）时显示。
-          // 会话开启（有内容）后头部徽章接管，FAB 消失。
-          let showFab = false;
-          if (props.useSessions) {
-            const current = props.useSessions((s) => s.current);
-            if (!current) {
-              showFab = true;
-            } else {
-              const blank = props.useSessions((s) => (s.current && s.byId[s.current] ? s.byId[s.current].blank === true : false));
-              if (blank) showFab = true;
-            }
-          } else {
-            // 拿不到 useSessions（理论上 root 槽必有）：保守显示 FAB，避免无入口
-            showFab = true;
-          }
-          if (!showFab) return null;
+          // 关闭状态：始终显示 FAB（面板未打开时）。入口不能依赖脆弱的
+          // useSessions 判断——props 形态/current 是否 blank 都可能因 DSH 版本
+          // 变化而不可靠，FAB 无条件显示保证永远有入口；头部徽章作为会话内
+          // 增强（含分支名 + dirty 点），两者不冲突。
           return ReactDOM.createPortal(
             React.createElement(GitFab, { onClick: () => setOpen(true, undefined) }),
             document.body,
