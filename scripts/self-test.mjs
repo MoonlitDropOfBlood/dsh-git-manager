@@ -1105,17 +1105,21 @@ test("static: index.js 的 import source 与 git-core.mjs 实际 export 一致",
   check("index.js 不从 git-core 导入 computeGraph", !importedFromCore.has("computeGraph"));
 });
 
-test("static: client.js 入口模型（composer 工具行 + 无 FAB 残留 + remote 经 props 注入）", () => {
+test("static: client.js 入口模型（composer 工具行唯一入口 + 无 FAB/头部徽章残留 + remote 经 props 注入）", () => {
   const clientSrc = readFileSync(join(__projectRoot, "client.js"), "utf8");
   check("注册 conversation.input.left（模式选择器旁）", clientSrc.includes('"conversation.input.left"'));
-  check("注册 conversation.session.header.actions", clientSrc.includes('"conversation.session.header.actions"'));
   check("注册 shell.overlay（面板宿主）", clientSrc.includes('"shell.overlay"'));
   check("无 FAB 残留（gm-fab）", !clientSrc.includes("gm-fab"));
   check("无 GitFab 组件残留", !clientSrc.includes("GitFab"));
+  // 用户决策：唯一入口在 composer 工具行，头部徽章已移除
+  check("无头部徽章槽位残留", !clientSrc.includes("conversation.session.header.actions"));
+  check("无 HeaderGitBadge 组件残留", !clientSrc.includes("HeaderGitBadge"));
   // 入口按钮必须有 git 仓库判断（非仓库返回 null 不渲染）
   check("ComposerGitButton 有 isRepo 判断", /probe\.isRepo/.test(clientSrc));
+  // 弹窗行为与设置一致：mask 点击关闭 + document 级 Esc
+  check("面板有 mask 层", clientSrc.includes("gm-mask"));
+  check("面板支持 Esc 关闭", /e\.key === "Escape"/.test(clientSrc));
   // factory 作用域没有 remote；组件裸引用会在异步 effect 里 ReferenceError，静默永不渲染（实测踩坑）
-  check("HeaderGitBadge 从 props 取 remote", /function HeaderGitBadge\(props\) \{[\s\S]*?const remote = props && props\.remote/.test(clientSrc));
   check("ComposerGitButton 从 props 取 remote", /function ComposerGitButton\(props\) \{[\s\S]*?const remote = props && props\.remote/.test(clientSrc));
 });
 

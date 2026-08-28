@@ -6,9 +6,9 @@
  *   2. 注册 `conversation.input.left` 槽 → composer 工具行（模式/access-mode 选择器旁）
  *      的 Git 入口按钮（session 作用域；hero 空白会话的 composer 同样渲染这一行，
  *      一个槽位同时覆盖 hero 与会话内；仅当目标目录是 git 仓库时显示）
- *   3. 注册 `conversation.session.header.actions` 槽 → 头部分支徽章（session 作用域）
- *   4. 注册 `shell.overlay` 槽 → 面板打开时渲染全屏 GitPanel
- *      （用 ReactDOM.createPortal 落 body，绕开 stacking context）
+ *   3. 注册 `shell.overlay` 槽 → 面板打开时渲染 GitPanel 弹窗
+ *      （用 ReactDOM.createPortal 落 body，绕开 stacking context；
+ *      尺寸/遮罩/Esc 关闭行为与「设置」面板一致）
  *
  * 面板本体 GitPanel 是统一的组件，包含五个 Tab（变更 / 分支 / 历史 / 冲突 / Worktree）。
  *
@@ -26,89 +26,89 @@ window.__ModuleLoader__.load({
     const ReactDOM = require("react-dom");
     const ui = require("@deepseek-ai/dsh-client-ui-primitives");
 
-    // ---- CSS（gm- 前缀，颜色全部走 dsw 主题令牌以适配明暗） ----
+    // ---- CSS（gm- 前缀，颜色全部走 dsw 主题令牌以适配明暗；弹窗尺寸/结构与设置面板一致） ----
     const CSS = `
-.gm-overlay{position:fixed;inset:0;z-index:1000;background:var(--dsw-alias-bg-mask-1,rgba(0,0,0,.45));display:flex;align-items:center;justify-content:center;padding:24px}
-.gm-panel{width:min(1180px,94vw);max-height:90vh;display:flex;flex-direction:column;background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1,#fff));color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.18));border-radius:16px;box-shadow:var(--dsw-shadow-lv2,0 12px 40px rgba(0,0,0,.25));overflow:hidden}
-.gm-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12))}
+.gm-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center}
+.gm-mask{position:absolute;inset:0;background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur)}
+.gm-panel{position:relative;z-index:1;width:800px;max-width:calc(100vw - 48px);height:min(800px,100vh - 48px);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border-radius:24px;box-shadow:var(--dsw-shadow-lv3);overflow:hidden}
+.gm-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .gm-head-title{font-size:14px;font-weight:600;flex:none}
 .gm-head-spacer{flex:1}
 .gm-head-actions{display:flex;gap:6px;flex:none;align-items:center}
-.gm-banner{padding:10px 14px;background:rgba(245,185,66,.12);color:#c97a00;font-size:12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12))}
-.gm-banner-danger{padding:10px 14px;background:rgba(229,72,77,.10);color:var(--dsw-alias-state-error-primary,#e5484d);font-size:12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12))}
+.gm-banner{padding:10px 14px;background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-state-warn-label);font-size:12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.gm-banner-danger{padding:10px 14px;background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);font-size:12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .gm-main{flex:1;display:flex;min-height:0}
-.gm-tabs{display:flex;flex-direction:column;width:140px;flex:none;border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12));padding:8px 6px;gap:2px;background:var(--dsw-alias-bg-layer-1)}
-.gm-tab{appearance:none;background:transparent;border:none;cursor:pointer;text-align:left;padding:8px 12px;border-radius:8px;font:inherit;font-size:13px;color:var(--dsw-alias-label-secondary);display:flex;align-items:center;gap:8px}
-.gm-tab:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.10));color:var(--dsw-alias-label-primary)}
-.gm-tab-active{background:var(--dsw-alias-interactive-bg-hover,rgba(74,125,255,.16));color:var(--dsw-alias-brand-primary,#4a7dff);font-weight:500}
-.gm-tab-badge{margin-left:auto;font-size:10px;line-height:14px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-state-error-primary,#e5484d);color:#fff;min-width:14px;text-align:center}
+.gm-tabs{display:flex;flex-direction:column;width:140px;flex:none;border-right:1px solid var(--dsw-alias-border-l1);padding:8px 6px;gap:2px}
+.gm-tab{appearance:none;background:transparent;border:none;cursor:pointer;text-align:left;padding:8px 12px;border-radius:10px;font:inherit;font-size:13px;color:var(--dsw-alias-label-primary);display:flex;align-items:center;gap:8px}
+.gm-tab:hover{background:var(--dsw-specific-sidebar-nav-item-hover)}
+.gm-tab-active{background:var(--dsw-specific-sidebar-nav-item-active);font-weight:500}
+.gm-tab-badge{margin-left:auto;font-size:10px;line-height:14px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-primary-inverted);min-width:14px;text-align:center}
 .gm-content{flex:1;min-width:0;overflow:auto;padding:14px 16px}
-.gm-error{padding:8px 14px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover-danger,rgba(229,72,77,.08));color:var(--dsw-alias-state-error-primary,#e5484d);font-size:12px;margin-bottom:10px;white-space:pre-wrap}
-.gm-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-top-color:var(--dsw-alias-brand-primary,#4a7dff);animation:gm-spin .8s linear infinite;flex:none;display:inline-block;vertical-align:middle}
+.gm-error{padding:8px 14px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);font-size:12px;margin-bottom:10px;white-space:pre-wrap}
+.gm-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--dsw-alias-border-l1);border-top-color:var(--dsw-alias-brand-primary);animation:gm-spin .8s linear infinite;flex:none;display:inline-block;vertical-align:middle}
 @keyframes gm-spin{to{transform:rotate(360deg)}}
 .gm-empty{padding:36px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
 
 /* Composer 工具行入口按钮（模式/access-mode 选择器旁，conversation.input.left） */
-.gm-toolbtn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 9px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;line-height:1}
-.gm-toolbtn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.10));color:var(--dsw-alias-label-primary)}
+.gm-toolbtn{display:inline-flex;align-items:center;gap:5px;height:28px;margin-left:-4px;padding:0 7px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;line-height:1}
+.gm-toolbtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .gm-toolbtn svg{flex:none}
 .gm-toolbtn-label{max-width:140px;overflow:hidden;text-overflow:ellipsis}
 
-/* Header badge */
-.gm-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12));font-size:12px;color:var(--dsw-alias-label-primary);cursor:pointer;line-height:18px}
-.gm-badge:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.10))}
-.gm-badge-detached{font-family:ui-monospace,monospace;font-size:11px}
-.gm-badge-dirty{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary,#4a7dff)}
-.gm-badge-ahead{color:var(--dsw-alias-state-success-primary,#2fb37d);font-weight:500}
-.gm-badge-behind{color:var(--dsw-alias-state-error-primary,#e5484d);font-weight:500}
+/* 面板头部 ahead/behind 只读徽章 */
+.gm-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--dsw-alias-label-primary);line-height:18px}
+.gm-badge-ahead{color:var(--dsw-alias-state-success-primary);font-weight:500}
+.gm-badge-behind{color:var(--dsw-alias-state-error-primary);font-weight:500}
 
 /* Repo select + header controls */
-.gm-select{box-sizing:border-box;height:30px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));border-radius:8px;padding:0 8px;outline:none;max-width:280px}
-.gm-input{box-sizing:border-box;height:30px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));border-radius:8px;padding:0 10px;outline:none}
-.gm-btn{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
-.gm-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.10))}
-.gm-btn-primary{background:var(--dsw-alias-brand-primary,#4a7dff);color:#fff;border-color:var(--dsw-alias-brand-primary,#4a7dff)}
-.gm-btn-primary:hover{filter:brightness(.95);background:var(--dsw-alias-brand-primary,#4a7dff)}
-.gm-btn-danger{color:var(--dsw-alias-state-error-primary,#e5484d);border-color:rgba(229,72,77,.3)}
+.gm-select{box-sizing:border-box;height:30px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:0 8px;outline:none;max-width:280px}
+.gm-input{box-sizing:border-box;height:30px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:0 10px;outline:none}
+.gm-btn{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.gm-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.gm-btn-icon{width:30px;padding:0}
+.gm-btn-primary{background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));color:var(--dsw-alias-label-primary-inverted,#fff);border-color:transparent}
+.gm-btn-primary:hover{background:var(--dsw-alias-button-primary-hover,var(--dsw-alias-brand-primary))}
+.gm-btn-danger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent)}
+.gm-btn-danger:hover{background:var(--dsw-alias-interactive-bg-hover-danger)}
 .gm-btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* File list (Changes tab) */
 .gm-filegroup{padding:8px 0}
-.gm-filegroup-head{display:flex;align-items:center;gap:8px;font-weight:500;font-size:12px;color:var(--dsw-alias-label-secondary);padding:4px 2px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12));margin-bottom:6px}
-.gm-file{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13px}
-.gm-file:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.08))}
-.gm-file-active{background:var(--dsw-alias-interactive-bg-hover,rgba(74,125,255,.12))}
-.gm-file-kind{font-size:10px;padding:0 6px;border-radius:999px;background:rgba(128,128,128,.12);color:var(--dsw-alias-label-secondary);text-transform:uppercase;line-height:16px;flex:none}
-.gm-file-kind-modified{background:rgba(74,125,255,.16);color:var(--dsw-alias-brand-primary,#4a7dff)}
-.gm-file-kind-added{background:rgba(62,207,142,.16);color:#2fb37d}
-.gm-file-kind-deleted{background:rgba(229,72,77,.16);color:#e5484d}
-.gm-file-kind-renamed{background:rgba(167,139,250,.16);color:#9b7ff0}
+.gm-filegroup-head{display:flex;align-items:center;gap:8px;font-weight:500;font-size:12px;color:var(--dsw-alias-label-secondary);padding:4px 2px;border-bottom:1px solid var(--dsw-alias-border-l1);margin-bottom:6px}
+.gm-file{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary)}
+.gm-file:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.gm-file-active{background:var(--dsw-alias-interactive-bg-active)}
+.gm-file-kind{font-size:10px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);text-transform:uppercase;line-height:16px;flex:none}
+.gm-file-kind-modified{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 15%,transparent);color:var(--dsw-alias-brand-primary)}
+.gm-file-kind-added{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 15%,transparent);color:var(--dsw-alias-state-success-primary)}
+.gm-file-kind-deleted{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 15%,transparent);color:var(--dsw-alias-state-error-primary)}
+.gm-file-kind-renamed{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent);color:var(--dsw-alias-state-business-primary)}
 .gm-file-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gm-file-old{color:var(--dsw-alias-label-tertiary);font-size:11px;margin-left:4px}
 
 /* Diff view */
-.gm-diff{background:var(--dsw-alias-bg-layer-2,#f7f7f9);border-radius:10px;padding:10px 14px;margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px;overflow-x:auto;max-height:60vh}
-.gm-diff-file{padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12))}
+.gm-diff{background:var(--dsw-alias-bg-layer-1);border-radius:10px;padding:10px 14px;margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px;overflow-x:auto;max-height:60vh}
+.gm-diff-file{padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .gm-diff-file:last-child{border-bottom:none}
 .gm-diff-fileh{font-family:var(--dsw-font-sans,inherit);font-size:12px;font-weight:500;color:var(--dsw-alias-label-primary);padding:4px 0;cursor:pointer;display:flex;align-items:center;gap:8px}
-.gm-diff-fileh:hover{color:var(--dsw-alias-brand-primary,#4a7dff)}
-.gm-diff-hunk{color:#888;font-size:11px;padding:2px 0}
+.gm-diff-fileh:hover{color:var(--dsw-alias-brand-primary)}
+.gm-diff-hunk{color:var(--dsw-alias-label-tertiary);font-size:11px;padding:2px 0}
 .gm-diff-line{white-space:pre;padding:0 6px}
-.gm-diff-add{background:rgba(62,207,142,.18);color:#1f7a4d}
-.gm-diff-del{background:rgba(229,72,77,.16);color:#a31c20}
+.gm-diff-add{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 15%,transparent);color:var(--dsw-alias-state-success-primary)}
+.gm-diff-del{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 15%,transparent);color:var(--dsw-alias-state-error-primary)}
 .gm-diff-ctx{color:var(--dsw-alias-label-secondary)}
-.gm-diff-meta{color:#888}
+.gm-diff-meta{color:var(--dsw-alias-label-tertiary)}
 .gm-diff-trunc{padding:8px 0;font-family:var(--dsw-font-sans,inherit);font-size:12px;color:var(--dsw-alias-label-tertiary);font-style:italic}
 
 /* Commit box */
-.gm-commit{margin-top:14px;display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12));border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
-.gm-textarea{box-sizing:border-box;width:100%;min-height:60px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2,#fafafc);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));border-radius:8px;padding:8px;outline:none;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.gm-commit{margin-top:14px;display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.gm-textarea{box-sizing:border-box;width:100%;min-height:60px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:8px;outline:none;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .gm-checkbox{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary);cursor:pointer}
-.gm-checkbox input{accent-color:var(--dsw-alias-brand-primary,#4a7dff)}
+.gm-checkbox input{accent-color:var(--dsw-alias-brand-primary)}
 
 /* Confirm dialog */
-.gm-confirm{position:fixed;inset:0;z-index:1100;background:var(--dsw-alias-bg-mask-1,rgba(0,0,0,.45));display:flex;align-items:center;justify-content:center}
-.gm-confirm-modal{width:min(420px,90vw);padding:18px;background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1,#fff));border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));border-radius:12px;box-shadow:var(--dsw-shadow-lv2)}
+.gm-confirm{position:fixed;inset:0;z-index:1100;background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur);display:flex;align-items:center;justify-content:center}
+.gm-confirm-modal{width:min(420px,90vw);padding:18px;background:var(--dsw-alias-bg-layer-2);border-radius:16px;box-shadow:var(--dsw-shadow-lv3)}
 .gm-confirm-title{font-size:14px;font-weight:600;margin-bottom:8px}
 .gm-confirm-msg{font-size:13px;color:var(--dsw-alias-label-secondary);margin-bottom:14px;white-space:pre-wrap}
 .gm-confirm-actions{display:flex;justify-content:flex-end;gap:8px}
@@ -234,87 +234,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // ---- Header badge ----
-    // 注册在 conversation.session.header.actions（session 作用域）。该槽的 owner props 是空对象
-    // {}（render 侧 renderSlot("conversation.session.header.actions", {})），但 framework 会给
-    // 每个 session-scope 槽注入标准 kit：sessionId + useSession + useProjection（见
-    // dsh-client-runtime SessionStandardProps）。注意：这里【没有】useSessions / useWorkspaces
-    // （那是 root-scope 槽才有的）。所以用 props.sessionId + ctx.sessions.list 拿 cwd。
-    // 注意：remote 必须由 apply 内的 wrapper 经 props 注入——本组件定义在 factory
-    // 作用域，那里没有 remote；直接引用会在异步 effect 里抛 ReferenceError，
-    // 不崩 React 树、只静默永远不渲染（实测踩坑）。
-    function HeaderGitBadge(props) {
-      const sessions = props && props.sessions;
-      const remote = props && props.remote;
-      // 订阅 ctx.sessions.list（ObservableSnapshot: getSnapshot + subscribe）取当前 summary
-      let list = { byId: {}, current: undefined };
-      if (sessions && sessions.list) {
-        try {
-          list = React.useSyncExternalStore(
-            sessions.list.subscribe.bind(sessions.list),
-            () => sessions.list.getSnapshot() || list,
-          );
-        } catch (e) {
-          list = { byId: {}, current: undefined };
-        }
-      }
-      // sessionId 优先级：framework kit 显式传的 props.sessionId > list.current（兜底）
-      const sessionId = (props && props.sessionId) || (list && list.current);
-      const summary = (sessionId && list.byId) ? list.byId[sessionId] : undefined;
-      const cwd = (summary && summary.cwd) || null;
-      const [probe, setProbe] = React.useState(null);
-      const [overview, setOverview] = React.useState(null);
-      const [tick, setTick] = React.useState(0);
-
-      // 组件挂载 + 每 60s 拉一次 overview（仅在 cwd 是仓库时显示）
-      React.useEffect(() => {
-        let alive = true;
-        let interval = null;
-        async function refresh() {
-          if (!cwd || !remote) { setProbe({ isRepo: false }); setOverview(null); return; }
-          const r = await unwrap(await remote.overview({ path: cwd }));
-          if (!alive) return;
-          if (r.ok && r.value) {
-            setProbe(r.value.probe);
-            setOverview(r.value.status);
-          } else {
-            setProbe({ isRepo: false });
-            setOverview(null);
-          }
-        }
-        refresh();
-        interval = setInterval(refresh, 60000);
-        return () => { alive = false; if (interval) clearInterval(interval); };
-      }, [cwd, tick, remote]);
-
-      if (!probe || probe.isRepo === false) return null;
-
-      const branchLabel = probe.detached
-        ? (probe.headShort || "detached")
-        : (probe.branch || "(no branch)");
-      const dirty = (overview && (overview.staged.length > 0 || overview.unstaged.length > 0 || overview.untracked.length > 0)) ? true : false;
-      const ahead = overview ? overview.ahead : 0;
-      const behind = overview ? overview.behind : 0;
-      return React.createElement("button", {
-        type: "button",
-        className: "gm-badge" + (probe.detached ? " gm-badge-detached" : ""),
-        title: cwd + "\n点击打开 Git 管理面板",
-        onClick: () => { setOpen(true, cwd); setTick((x) => x + 1); },
-      },
-        React.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, "aria-hidden": true },
-          React.createElement("path", { d: "M6 3v12" }),
-          React.createElement("circle", { cx: 18, cy: 6, r: 3 }),
-          React.createElement("circle", { cx: 6, cy: 18, r: 3 }),
-          React.createElement("path", { d: "M18 9a9 9 0 0 1-9 9" }),
-        ),
-        React.createElement("span", null, branchLabel),
-        dirty ? React.createElement("span", { className: "gm-badge-dirty", "aria-label": "有未提交变更" }) : null,
-        ahead > 0 ? React.createElement("span", { className: "gm-badge-ahead" }, "↑" + ahead) : null,
-        behind > 0 ? React.createElement("span", { className: "gm-badge-behind" }, "↓" + behind) : null,
-      );
-    }
-
-    // ---- GitPanel（Task 14-17 填五个 Tab 的内容；此处先搭壳） ----
+    // ---- GitPanel（五个 Tab 的内容；此处是壳） ----
     function GitPanel(props) {
       const remote = props.remote;
       const onClose = props.onClose;
@@ -403,7 +323,12 @@ window.__ModuleLoader__.load({
           React.createElement("button", { className: "gm-btn", onClick: async () => { const r = await unwrap(await remote.fetch({ path: repoPath })); if (!r.ok) setError(r.error.message); else { setStatus(r.value.status); setRemotes(r.value.remotes || remotes); } }, disabled: !!busy }, "Fetch"),
           React.createElement("button", { className: "gm-btn", onClick: async () => { const r = await act("Pull", () => remote.pull({ path: repoPath })); }, disabled: !!busy }, "Pull"),
           React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: async () => { const r = await act("Push", () => remote.push({ path: repoPath })); }, disabled: !!busy }, "Push"),
-          React.createElement("button", { className: "gm-btn", onClick: () => setOpen(false), title: "关闭" }, "✕"),
+          React.createElement("button", { className: "gm-btn gm-btn-icon", onClick: () => setOpen(false), title: "关闭（Esc）", "aria-label": "关闭 Git 管理面板" },
+            React.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", "aria-hidden": true },
+              React.createElement("path", { d: "M18 6 6 18" }),
+              React.createElement("path", { d: "m6 6 12 12" }),
+            ),
+          ),
         ),
       );
 
@@ -926,7 +851,7 @@ window.__ModuleLoader__.load({
             onClick: () => loadCommitDiff(c.sha),
           },
             React.createElement("span", { style: { fontFamily: "ui-monospace,monospace", fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginRight: 8 } }, c.short),
-            c.refs ? React.createElement("span", { style: { fontSize: 10, padding: "0 6px", borderRadius: 999, background: "rgba(74,125,255,.16)", color: "var(--dsw-alias-brand-primary,#4a7dff)", marginRight: 8 } }, c.refs) : null,
+            c.refs ? React.createElement("span", { style: { fontSize: 10, padding: "0 6px", borderRadius: 999, background: "color-mix(in srgb,var(--dsw-alias-brand-primary) 15%,transparent)", color: "var(--dsw-alias-brand-primary)", marginRight: 8 } }, c.refs) : null,
             React.createElement("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.subject),
             React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8 } }, c.author),
             React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8 } }, fmtTime(c.at)),
@@ -1113,20 +1038,7 @@ window.__ModuleLoader__.load({
       // ctx.get 不受 inject 属性守卫限制（与 archive-manager 同款）
       const remote = ctx.get("remote.gitManager");
 
-      // ① 头部徽章（session 作用域）
-      // 槽位渲染时 owner props 是空对象 {}，framework 注入 session kit
-      // （sessionId / useSession），不含 sessions 服务——这里用稳定 wrapper 把
-      // ctx.sessions 与 remote 塞进去（wrapper 定义在 apply 内、只执行一次，身份稳定）。
-      const sessions = ctx.get("sessions");
-      function HeaderGitBadgeSlot(props) {
-        return React.createElement(HeaderGitBadge, Object.assign({}, props, { sessions, remote }));
-      }
-      ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register(
-        { name: "conversation.session.header.actions", id: "git-manager", order: 100, label: () => "Git" },
-        HeaderGitBadgeSlot,
-      ));
-
-      // ② Composer 工具行入口（conversation.input.left，模式/access-mode 选择器旁）
+      // ① Composer 工具行入口（conversation.input.left，模式/access-mode 选择器旁）
       //    该槽有完整标准 kit（含 useSessions），只需注入 remote。
       //    hero 空白会话的 composer 同样渲染这一行，一个槽位同时覆盖 hero 与会话内。
       function ComposerGitButtonSlot(props) {
@@ -1137,18 +1049,26 @@ window.__ModuleLoader__.load({
         ComposerGitButtonSlot,
       ));
 
-      // ③ shell.overlay 注册：仅承担全屏面板（入口已挪到 composer 工具行）。
+      // ② shell.overlay 注册：仅承担全屏面板（唯一入口在 composer 工具行）。
       //    DOM 用 ReactDOM.createPortal 落到 body（z-index 1000），绕开
       //    shell.overlay 槽位宿主 stacking context 的 z-index 锁死。
       //    React 树仍属于 shell.overlay 槽（生命周期完整），只是 DOM 出口换了。
+      //    结构与设置面板一致：mask 点击关闭 + document 级 Esc 关闭。
       ctx.slots.inject("shell.overlay", () => ctx.slots.register(
         { name: "shell.overlay", id: "git-manager", order: 150 },
         (props) => {
           const isOpen = useOpen();
+          React.useEffect(() => {
+            if (!isOpen) return;
+            const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+            document.addEventListener("keydown", onKey);
+            return () => document.removeEventListener("keydown", onKey);
+          }, [isOpen]);
           if (!isOpen) return null;
           const close = () => setOpen(false);
           return ReactDOM.createPortal(
-            React.createElement("div", { className: "gm-overlay", onClick: close },
+            React.createElement("div", { className: "gm-overlay", role: "presentation" },
+              React.createElement("div", { className: "gm-mask", "aria-hidden": true, onClick: close }),
               React.createElement(GitPanel, { slotProps: props, remote, onClose: close }),
             ),
             document.body,

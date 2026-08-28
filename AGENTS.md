@@ -6,7 +6,8 @@
 
 一个 **DeepSeek Harness（DSH）双面（Host + Client）插件**：在 DSH Web UI 中提供完整的 Git 工作区管理面板。
 
-- 入口在 composer 工具行「模式」（access-mode）选择器旁（`conversation.input.left` 槽），hero 空白会话与会话内都渲染这一行；**仅当目标目录是 git 仓库时显示**（probe 60s 轮询缓存，非仓库返回 null）。会话头部另有分支徽章（含 dirty / ahead/behind）作为增强入口。
+- 唯一入口在 composer 工具行「模式」（access-mode）选择器旁（`conversation.input.left` 槽），hero 空白会话与会话内都渲染这一行；**仅当目标目录是 git 仓库时显示**（probe 60s 轮询缓存，非仓库返回 null）。顶部无其他入口（头部徽章已按用户决策移除）。
+- 弹窗尺寸/结构与「设置」面板完全一致：`width:800px; max-width:calc(100vw - 48px); height:min(800px,100vh - 48px); border-radius:24px; background:--dsw-alias-bg-layer-2; box-shadow:--dsw-shadow-lv3`；mask 层 `--dsw-alias-bg-mask-1 + --dsw-mask-blur`，mask 点击与 document 级 Esc 都关闭。
 - 同一个 `shell.overlay` 全屏面板，五 Tab：变更 / 分支 / 历史 / 冲突 / Worktree。
 - 历史 Tab 的分支线由 Host 侧 `git-graph.mjs` 的 `computeGraph` 算好 layout，Client 纯 SVG 渲染。
 - 全屏面板用 `ReactDOM.createPortal(..., document.body)` 落到 body 层（z-index 1000），绕开 `shell.overlay` 槽位宿主 stacking context 的 z-index 锁死问题（详见注意事项 §1）。
@@ -17,7 +18,7 @@
 dsh-git-manager/
 ├── package.json
 ├── index.js              # Host 半：GitManagerService（TypertRemoteService 子类）
-├── client.js             # Client 半：__ModuleLoader__ bundle（composer 入口按钮 + 头部徽章 + 全屏面板）
+├── client.js             # Client 半：__ModuleLoader__ bundle（composer 入口按钮 + 弹窗面板）
 ├── typert.host.js        # Typert manifest：gitManager 全方法的 zod schema
 ├── git-core.mjs          # 零依赖：runGit 封装 + 全部查询/变更函数 + 解析器
 ├── git-graph.mjs         # 零依赖：computeGraph 分支线布局（纯函数）
@@ -74,8 +75,7 @@ window.__ModuleLoader__.load({
     async function apply(ctx) {
       await ctx.remote.$mount(CLIENT_REMOTE);
       // 挂样式、CSS
-      // 注册三个槽：conversation.input.left（composer 工具行入口）+
-      //   conversation.session.header.actions（头部徽章）+ shell.overlay（面板宿主）
+      // 注册两个槽：conversation.input.left（composer 工具行唯一入口）+ shell.overlay（面板宿主）
       // shell.overlay 注册的组件里用 ReactDOM.createPortal(panelContent, document.body)
       // 让面板 DOM 落在 body 层（z-index 1000），避开 shell.overlay 的 stacking context 锁死
     }
@@ -117,10 +117,11 @@ dsh plugin --profile web add D:\ai-projects\dsh\dsh-git-manager   # 本地安装
 - **typert.host.js 必须导出 `TYPERT` 对象且 shape 严格（实测）**：dsh-typert-loader 的 `validateTypertManifest` 要求 `export const TYPERT = { package, face:"host", schemas:[], invocations:[...], model:{services:[...], events:[], objects:[]} }`。service 需 `key/exportName/members(数组, 每项 kind∈{method,property,...}+name+signature)/types(数组)/tags+description+summary+jsDoc`。缺 `model.events`/`model.objects` 数组、或只导出 model/invocations 而不导出 TYPERT，boot 报 `no TYPERT manifest object` / `TYPERT.model.events must be an array`。invocation 的 parameters/result codec 必须 `mode:"strict"` 且 schema 是 zod v4 实例。
 - **profile package.json 绝不能写 BOM（大坑，实测）**：DSH 的 `readProfileManifest` 直接 `JSON.parse` profile 的 `package.json`；任何 UTF-8 BOM 都会让它抛 `Unexpected token '﻿'` 崩溃——**整个 profile 起不来**（dump-config 和真实启动都崩）。Windows PowerShell 的 `Set-Content -Encoding UTF8` 默认写 BOM；改 `~/.dsh/profiles/web/package.json` 必须用无 BOM 编码（`.NET WriteAllText + UTF8Encoding(false)`，或 `dsh plugin add` 官方路径）。
 - **本地装完必须验证 boot manifest，而不是只信 `dsh plugin add` 成功**：`dsh --profile web --dump-config | findstr git-manager` 确认 entry 进组合树 → 起独立端口实例 → 抓 HTML 的 `__DSH_BOOT__` 看 `id:"@duke-dsh-plugins/dsh-git-manager"` 是否出现 → `curl http://127.0.0.1:PORT/plugins/@duke-dsh-plugins/dsh-git-manager/client.js` 是否 200。loader import 失败（如缺 default 导出）会**静默剔除 client bundle**（`processOne` 对 fiber 未挂载的 entry 直接 `table.delete`，不报错），表现为"Host 不崩但入口消失"。
-- **弹窗层级**：本插件**不**直接用 `shell.overlay` 渲染 DOM——因为该槽宿主在 AppFrame 的 `.overlayLayer`（`position:absolute; z-index:20`）内，子元素 z-index 被 stacking context 锁死，dsh-better-sidebar（z-index:25）会把面板盖住。**修复**：全屏面板用 `ReactDOM.createPortal(..., document.body)` 渲染到 body 层（`position:fixed; z-index:1000`），赢过一切页面层。注意 React 树仍属于 `shell.overlay` 槽（props / 生命周期完整），只是 DOM 出口换了。**绝不要**手动 `appendChild` 把 React 管理的 DOM 挪到 body（会偷走 React 节点导致下次调和 NotFoundError）——portal 才是官方逃生口。
+- **弹窗层级**：本插件**不**直接用 `shell.overlay` 渲染 DOM——因为该槽宿主在 AppFrame 的 `.overlayLayer`（`position:absolute; z-index:20`）内，子元素 z-index 被 stacking context 锁死，dsh-better-sidebar（z-index:25）会把面板盖住。**修复**：面板用 `ReactDOM.createPortal(..., document.body)` 渲染到 body 层（`position:fixed; z-index:1000`），赢过一切页面层。注意 React 树仍属于 `shell.overlay` 槽（props / 生命周期完整），只是 DOM 出口换了。**绝不要**手动 `appendChild` 把 React 管理的 DOM 挪到 body（会偷走 React 节点导致下次调和 NotFoundError）——portal 才是官方逃生口。
+- **颜色一律走 dsw token，禁止硬编码 hex/rgba（用户实测反馈）**：亮/暗主题下硬编码色必有一边翻车。映射规则：警示横幅 `state-warn-tertiary`/`state-warn-label`，错误 `state-error-primary`+`interactive-bg-hover-danger`，成功 `state-success-primary`，主按钮 `button-primary-fill`/`button-primary-hover`+`label-primary-inverted`，选中态 `specific-sidebar-nav-item-active`（与设置导航一致），次要文字 `label-secondary/tertiary`。需要"某颜色的 15% 透明底"时用 `color-mix(in srgb, var(--dsw-...) 15%, transparent)`（WebView2/Chromium ≥111 支持）。图标不依赖 ui-primitives 的 Icon 导出（共享模块表不保证有），一律内联 SVG（stroke=currentColor）。
 - **会话头部槽位 kit**：`conversation.session.header.actions` 是 session-scope 槽，owner props 是空对象 `{}`，只有 framework 注入的 `sessionId`/`useSession`/`useProjection`——**没有** `useSessions`/`useWorkspaces`（那是 root-scope 槽才有）。要拿会话 cwd 用 `props.sessionId` + `ctx.sessions.list`（ObservableSnapshot: getSnapshot + subscribe，可直接喂 useSyncExternalStore）。
 - **composer 工具行入口槽 `conversation.input.left`（实测）**：session-scope list 槽，位于 composer 卡片内工具行左端、紧跟常驻 chrome（access-mode/plan/attach）——即"模式选择器旁边"的正确挂载点（右下角 FAB 会与其他插件冲突，已废弃）。标准 kit **含** `useSessions`/`useWorkspaces`/`useInput`/`inputActions`，比 header.actions 全；hero 空白会话的 composer 同样渲染这一行，一个槽位覆盖两种上下文。同类还有 `conversation.input.right`（send 按钮左侧）。
-- **factory 作用域没有 `remote`（实测踩坑）**：组件都定义在 bundle factory 作用域，而 `remote = ctx.get("remote.gitManager")` 是 `apply()` 的局部变量——组件里裸引用 `remote` 会 ReferenceError。若抛在**异步 effect** 里则不崩 React 树、组件只是静默永不渲染（HeaderGitBadge 曾因此长期不可见且无任何报错）。规则：组件一律从 `props.remote` 取，由 apply 内 wrapper（`HeaderGitBadgeSlot`/`ComposerGitButtonSlot`）注入；self-test 有静态守卫。
+- **factory 作用域没有 `remote`（实测踩坑）**：组件都定义在 bundle factory 作用域，而 `remote = ctx.get("remote.gitManager")` 是 `apply()` 的局部变量——组件里裸引用 `remote` 会 ReferenceError。若抛在**异步 effect** 里则不崩 React 树、组件只是静默永不渲染（曾有组件因此长期不可见且无任何报错）。规则：组件一律从 `props.remote` 取，由 apply 内 wrapper（`ComposerGitButtonSlot`）注入；self-test 有静态守卫。
 - **路径归一化（review 教训）**：`safeJoin` 接收 `git rev-parse --show-toplevel` 输出的 toplevel；Windows git 输出**正斜杠**（如 `D:/repo`），而 `node:path.resolve` 归一为**反斜杠**（`D:\repo`）。如果直接 `startsWith(toplevel + sep)` 会永远 false，所有合法路径被误判越界。正确做法：`const root = resolve(toplevel)`，再用 `startsWith(root + sep)`。
 - **MERGE_HEAD 路径（review 教训）**：`git rev-parse --git-dir` 在 cwd=toplevel 时返回相对路径 `.git`；`existsSync(join(gitDir, "MERGE_HEAD"))` 必须先 `resolve(cwd, gitDir)` 归一化到绝对路径，否则 MERGE_HEAD 检测落到 DSH 进程 cwd 上、永远 false，合并进行中 banner 不会出现。
 - **continueMerge 守门**：MERGE_HEAD / rebase-merge / rebase-apply 任一不存在时**必须抛错**——否则 `git commit --no-edit` 会提交 staged 内容，得到一个意外的"空 commit"。`git-core.mjs:continueMerge` 已加守卫。
