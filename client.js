@@ -3,11 +3,12 @@
  *
  * 由 DSH web shell 通过 `window.__ModuleLoader__.load` 加载。本 bundle：
  *   1. 自挂载 `gitManager` Remote 命名空间（dsh-api-remotes 只硬编码挂载官方命名空间）
- *   2. 注册 `conversation.session.header.actions` 槽 → 头部分支徽章（session 作用域）
- *   3. 注册 `shell.overlay` 槽 → 同一 React 树里根据状态渲染
- *      - 未开会话（hero 视图）：右下角悬浮按钮 GitFab
- *      - 已开会话：FAB 隐藏（header 徽章接管）
- *      - 面板打开：全屏面板 GitPanel（用 ReactDOM.createPortal 落 body，绕开 stacking context）
+ *   2. 注册 `conversation.input.left` 槽 → composer 工具行（模式/access-mode 选择器旁）
+ *      的 Git 入口按钮（session 作用域；hero 空白会话的 composer 同样渲染这一行，
+ *      一个槽位同时覆盖 hero 与会话内；仅当目标目录是 git 仓库时显示）
+ *   3. 注册 `conversation.session.header.actions` 槽 → 头部分支徽章（session 作用域）
+ *   4. 注册 `shell.overlay` 槽 → 面板打开时渲染全屏 GitPanel
+ *      （用 ReactDOM.createPortal 落 body，绕开 stacking context）
  *
  * 面板本体 GitPanel 是统一的组件，包含五个 Tab（变更 / 分支 / 历史 / 冲突 / Worktree）。
  *
@@ -47,13 +48,11 @@ window.__ModuleLoader__.load({
 @keyframes gm-spin{to{transform:rotate(360deg)}}
 .gm-empty{padding:36px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
 
-/* FAB */
-.gm-fab-root{position:fixed;right:24px;bottom:80px;z-index:1000}
-.gm-fab{width:48px;height:48px;border-radius:50%;border:none;background:var(--dsw-alias-brand-primary,#4a7dff);color:#fff;cursor:pointer;box-shadow:var(--dsw-shadow-lv2,0 4px 14px rgba(0,0,0,.18));display:flex;align-items:center;justify-content:center;transition:transform .12s ease}
-.gm-fab:hover{transform:scale(1.06)}
-.gm-fab:active{transform:scale(.97)}
-.gm-fab-tooltip{position:absolute;right:58px;top:50%;transform:translateY(-50%);background:var(--dsw-alias-bg-layer-2,#1f1f23);color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s}
-.gm-fab-root:hover .gm-fab-tooltip{opacity:1}
+/* Composer 工具行入口按钮（模式/access-mode 选择器旁，conversation.input.left） */
+.gm-toolbtn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 9px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;line-height:1}
+.gm-toolbtn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.10));color:var(--dsw-alias-label-primary)}
+.gm-toolbtn svg{flex:none}
+.gm-toolbtn-label{max-width:140px;overflow:hidden;text-overflow:ellipsis}
 
 /* Header badge */
 .gm-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.12));font-size:12px;color:var(--dsw-alias-label-primary);cursor:pointer;line-height:18px}
@@ -176,26 +175,62 @@ window.__ModuleLoader__.load({
       return "操作失败";
     }
 
-    // ---- FAB（bundle 作用域定义一次） ----
-    function GitFab(props) {
-      const onClick = props.onClick;
-      return React.createElement("div", { className: "gm-fab-root" },
-        React.createElement("span", { className: "gm-fab-tooltip" }, "Git 管理面板"),
-        React.createElement("button", {
-          type: "button",
-          className: "gm-fab",
-          onClick: onClick,
-          title: "打开 Git 管理面板",
-          "aria-label": "Git",
-        },
-          // git-branch 图标（Lucide 24×24）
-          React.createElement("svg", { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
-            React.createElement("path", { d: "M6 3v12" }),
-            React.createElement("circle", { cx: 18, cy: 6, r: 3 }),
-            React.createElement("circle", { cx: 6, cy: 18, r: 3 }),
-            React.createElement("path", { d: "M18 9a9 9 0 0 1-9 9" }),
-          ),
+    // ---- Composer 工具行入口按钮（conversation.input.left，模式/access-mode 选择器旁） ----
+    // 该槽是 session 作用域 list 槽，framework 注入完整标准 kit（sessionId / useSessions /
+    // useWorkspaces / useInput / inputActions，见 InputZone owner props）；hero 空白会话的
+    // composer 同样渲染这一行，一个槽位同时覆盖 hero 与会话内。
+    // 仅当目标目录是 git 仓库时显示（probe 结果 60s 轮询刷新；非仓库返回 null 不占位）。
+    function ComposerGitButton(props) {
+      const remote = props && props.remote;
+      const sessionId = props && props.sessionId;
+      const useSessions = props && props.useSessions;
+      // sessionId 优先级：framework kit 显式传的 props.sessionId > list.current（兜底）
+      const cwd = useSessions
+        ? useSessions((s) => {
+            const id = sessionId || (s && s.current);
+            const sum = id && s && s.byId ? s.byId[id] : undefined;
+            return (sum && sum.cwd) || null;
+          })
+        : null;
+      const [probe, setProbe] = React.useState(null);
+
+      React.useEffect(() => {
+        let alive = true;
+        async function run() {
+          if (!remote || !cwd) { setProbe(null); return; }
+          try {
+            const r = unwrap(await remote.probe({ path: cwd }));
+            if (!alive) return;
+            setProbe(r.ok && r.value ? r.value : { isRepo: false });
+          } catch (_) {
+            if (alive) setProbe({ isRepo: false });
+          }
+        }
+        run();
+        const t = setInterval(run, 60000);
+        return () => { alive = false; clearInterval(t); };
+      }, [cwd, remote]);
+
+      if (!cwd || !probe || !probe.isRepo) return null;
+
+      const label = probe.detached
+        ? (probe.headShort || "detached")
+        : (probe.branch || "");
+      return React.createElement("button", {
+        type: "button",
+        className: "gm-toolbtn",
+        title: "Git 管理面板\n" + cwd,
+        "aria-label": "打开 Git 管理面板",
+        onClick: () => setOpen(true, cwd),
+      },
+        // git-branch 图标（Lucide 24×24）
+        React.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+          React.createElement("path", { d: "M6 3v12" }),
+          React.createElement("circle", { cx: 18, cy: 6, r: 3 }),
+          React.createElement("circle", { cx: 6, cy: 18, r: 3 }),
+          React.createElement("path", { d: "M18 9a9 9 0 0 1-9 9" }),
         ),
+        label ? React.createElement("span", { className: "gm-toolbtn-label" }, label) : null,
       );
     }
 
@@ -205,8 +240,12 @@ window.__ModuleLoader__.load({
     // 每个 session-scope 槽注入标准 kit：sessionId + useSession + useProjection（见
     // dsh-client-runtime SessionStandardProps）。注意：这里【没有】useSessions / useWorkspaces
     // （那是 root-scope 槽才有的）。所以用 props.sessionId + ctx.sessions.list 拿 cwd。
+    // 注意：remote 必须由 apply 内的 wrapper 经 props 注入——本组件定义在 factory
+    // 作用域，那里没有 remote；直接引用会在异步 effect 里抛 ReferenceError，
+    // 不崩 React 树、只静默永远不渲染（实测踩坑）。
     function HeaderGitBadge(props) {
       const sessions = props && props.sessions;
+      const remote = props && props.remote;
       // 订阅 ctx.sessions.list（ObservableSnapshot: getSnapshot + subscribe）取当前 summary
       let list = { byId: {}, current: undefined };
       if (sessions && sessions.list) {
@@ -232,7 +271,7 @@ window.__ModuleLoader__.load({
         let alive = true;
         let interval = null;
         async function refresh() {
-          if (!cwd) { setProbe({ isRepo: false }); setOverview(null); return; }
+          if (!cwd || !remote) { setProbe({ isRepo: false }); setOverview(null); return; }
           const r = await unwrap(await remote.overview({ path: cwd }));
           if (!alive) return;
           if (r.ok && r.value) {
@@ -246,7 +285,7 @@ window.__ModuleLoader__.load({
         refresh();
         interval = setInterval(refresh, 60000);
         return () => { alive = false; if (interval) clearInterval(interval); };
-      }, [cwd, tick]);
+      }, [cwd, tick, remote]);
 
       if (!probe || probe.isRepo === false) return null;
 
@@ -1077,17 +1116,28 @@ window.__ModuleLoader__.load({
       // ① 头部徽章（session 作用域）
       // 槽位渲染时 owner props 是空对象 {}，framework 注入 session kit
       // （sessionId / useSession），不含 sessions 服务——这里用稳定 wrapper 把
-      // ctx.sessions 塞进去（wrapper 定义在 apply 内、只执行一次，身份稳定）。
+      // ctx.sessions 与 remote 塞进去（wrapper 定义在 apply 内、只执行一次，身份稳定）。
       const sessions = ctx.get("sessions");
       function HeaderGitBadgeSlot(props) {
-        return React.createElement(HeaderGitBadge, Object.assign({}, props, { sessions }));
+        return React.createElement(HeaderGitBadge, Object.assign({}, props, { sessions, remote }));
       }
       ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register(
         { name: "conversation.session.header.actions", id: "git-manager", order: 100, label: () => "Git" },
         HeaderGitBadgeSlot,
       ));
 
-      // ② shell.overlay 注册：根据面板状态 + 会话状态渲染 FAB 或 Panel
+      // ② Composer 工具行入口（conversation.input.left，模式/access-mode 选择器旁）
+      //    该槽有完整标准 kit（含 useSessions），只需注入 remote。
+      //    hero 空白会话的 composer 同样渲染这一行，一个槽位同时覆盖 hero 与会话内。
+      function ComposerGitButtonSlot(props) {
+        return React.createElement(ComposerGitButton, Object.assign({}, props, { remote }));
+      }
+      ctx.slots.inject("conversation.input.left", () => ctx.slots.register(
+        { name: "conversation.input.left", id: "git-manager", order: 100, label: () => "Git" },
+        ComposerGitButtonSlot,
+      ));
+
+      // ③ shell.overlay 注册：仅承担全屏面板（入口已挪到 composer 工具行）。
       //    DOM 用 ReactDOM.createPortal 落到 body（z-index 1000），绕开
       //    shell.overlay 槽位宿主 stacking context 的 z-index 锁死。
       //    React 树仍属于 shell.overlay 槽（生命周期完整），只是 DOM 出口换了。
@@ -1095,21 +1145,12 @@ window.__ModuleLoader__.load({
         { name: "shell.overlay", id: "git-manager", order: 150 },
         (props) => {
           const isOpen = useOpen();
-          if (isOpen) {
-            const close = () => setOpen(false);
-            return ReactDOM.createPortal(
-              React.createElement("div", { className: "gm-overlay", onClick: close },
-                React.createElement(GitPanel, { slotProps: props, remote, onClose: close }),
-              ),
-              document.body,
-            );
-          }
-          // 关闭状态：始终显示 FAB（面板未打开时）。入口不能依赖脆弱的
-          // useSessions 判断——props 形态/current 是否 blank 都可能因 DSH 版本
-          // 变化而不可靠，FAB 无条件显示保证永远有入口；头部徽章作为会话内
-          // 增强（含分支名 + dirty 点），两者不冲突。
+          if (!isOpen) return null;
+          const close = () => setOpen(false);
           return ReactDOM.createPortal(
-            React.createElement(GitFab, { onClick: () => setOpen(true, undefined) }),
+            React.createElement("div", { className: "gm-overlay", onClick: close },
+              React.createElement(GitPanel, { slotProps: props, remote, onClose: close }),
+            ),
             document.body,
           );
         },

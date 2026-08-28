@@ -1,7 +1,7 @@
 {
   "name": "@duke-dsh-plugins/dsh-git-manager",
   "version": "1.0.0",
-  "description": "DSH 正式 bundle 插件：在 DSH Web UI 里管理 Git 工作区——未开会话时右下角悬浮按钮（FAB）、会话内头部分支徽章入口，进入全屏面板覆盖 git status/diff、分支管理、合并冲突解决、commit/fetch/pull/push、worktree 管理、带分支线图形的提交历史。",
+  "description": "DSH 正式 bundle 插件：在 DSH Web UI 里管理 Git 工作区——入口在输入框「模式」选择器旁（仅 git 仓库显示）+ 会话头部分支徽章，进入全屏面板覆盖 git status/diff、分支管理、合并冲突解决、commit/fetch/pull/push、worktree 管理、带分支线图形的提交历史。",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/MoonlitDropOfBlood/dsh-git-manager.git"
