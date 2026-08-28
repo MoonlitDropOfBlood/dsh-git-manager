@@ -66,7 +66,7 @@ window.__ModuleLoader__.load({
 .gm-btn{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
 .gm-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .gm-btn-icon{width:30px;padding:0}
-.gm-btn-primary{background:var(--dsw-alias-button-info-fill);color:#fff;border-color:transparent}
+.gm-btn-primary{background:var(--dsw-alias-button-info-fill);color:#fff;border-color:transparent;background-clip:padding-box}
 .gm-btn-primary:hover{background:var(--dsw-alias-button-info-hover)}
 .gm-btn-danger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent)}
 .gm-btn-danger:hover{background:var(--dsw-alias-interactive-bg-hover-danger)}
