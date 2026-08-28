@@ -20,6 +20,7 @@ import { dirname } from "node:path";
 
 import * as core from "../git-core.mjs";
 import { computeGraph } from "../git-graph.mjs";
+import { TYPERT } from "../typert.host.js";
 
 // ---- harness --------------------------------------------------------------
 
@@ -1116,6 +1117,84 @@ test("static: client.js 入口模型（composer 工具行 + 无 FAB 残留 + rem
   // factory 作用域没有 remote；组件裸引用会在异步 effect 里 ReferenceError，静默永不渲染（实测踩坑）
   check("HeaderGitBadge 从 props 取 remote", /function HeaderGitBadge\(props\) \{[\s\S]*?const remote = props && props\.remote/.test(clientSrc));
   check("ComposerGitButton 从 props 取 remote", /function ComposerGitButton\(props\) \{[\s\S]*?const remote = props && props\.remote/.test(clientSrc));
+});
+
+// ============================================================================
+// wire-format 合规（live）：真实返回值必须同时过两道网关校验
+//   1. typert result codec 的 strict zod schema
+//   2. dsh-api-gateway 的 assertJsonValue（显式 undefined / schema 外 null /
+//      非 plain object / 循环引用全部拒绝）
+// 任一道失败 = 客户端 RPC 永久 pending、UI 静默无数据——2026-08-28 实测
+// probe.mainWorktreePath:undefined 与 worktree.prunable:null 双双踩中，
+// 症状是"入口按钮在真仓库里也不出现"。
+// ============================================================================
+
+const WIRE = Object.fromEntries(TYPERT.invocations.map((i) => [i.method, i.result.schema]));
+
+// 与 dsh-api-gateway assertJsonValue 等价（改动需与上游同步）
+function assertJsonSafe(value, path, ancestors) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) return;
+    throw new TypeError(path + ": non-finite number");
+  }
+  if (typeof value !== "object") throw new TypeError(path + ": " + typeof value + " is not JSON-safe");
+  if (ancestors.has(value)) throw new TypeError(path + ": cyclic");
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (Object.keys(value).length !== value.length) throw new TypeError(path + ": sparse/decorated array");
+      value.forEach((v, i) => assertJsonSafe(v, path + "[" + i + "]", ancestors));
+      return;
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== null && proto !== Object.prototype) throw new TypeError(path + ": non-plain object");
+    for (const key of Reflect.ownKeys(value)) {
+      const d = Object.getOwnPropertyDescriptor(value, key);
+      if (!d || !d.enumerable || !("value" in d)) throw new TypeError(path + "." + String(key) + ": non-data property");
+      assertJsonSafe(d.value, path + "." + String(key), ancestors);
+    }
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function wireCheck(method, value) {
+  const schema = WIRE[method];
+  if (!schema) throw new Error("typert.host.js 没有 " + method + " 的 invocation");
+  const parsed = schema.parse({ ok: true, value }); // 第一道：strict zod schema
+  assertJsonSafe(parsed, "root", new Set());         // 第二道：JSON-safe
+}
+
+live("wire: 全部查询/变更真实返回值过 strict schema + JSON-safe", async (tmp) => {
+  // 三类改动：unstaged（README）、staged（staged.txt）、untracked（untracked.txt）
+  await writeFile(join(tmp, "README.md"), "# init\nchanged\n");
+  await writeFile(join(tmp, "staged.txt"), "staged\n");
+  await runShell(tmp, ["git", "add", "staged.txt"]);
+  await writeFile(join(tmp, "untracked.txt"), "untracked\n");
+
+  const probe = await core.probeRepo(tmp);
+  wireCheck("probe", probe);
+  const status = await core.getStatus(tmp);
+  wireCheck("status", status);
+  const remotes = await core.getRemotes(tmp);
+  wireCheck("remotes", remotes);
+  wireCheck("overview", { probe, status, remotes });            // 与 index.js overview 同组装
+  wireCheck("branches", await core.getBranches(tmp));
+  const logRes = await core.getLog(tmp, { maxCount: 50 });
+  wireCheck("log", Object.assign({}, logRes, { graph: computeGraph(logRes.commits) })); // 与 index.js log 同组装
+  wireCheck("worktrees", await core.getWorktrees(tmp));
+  wireCheck("diff", await core.getDiff(tmp, { scope: "worktree" }));
+  wireCheck("diff", await core.getDiff(tmp, { scope: "staged" }));
+  wireCheck("diff", await core.getDiff(tmp, { scope: "untracked", file: "untracked.txt" }));
+
+  // 提交产生第二个 commit，然后验 commit 返回与 commit/compare 两个 diff scope
+  wireCheck("commit", await core.commitStaged(tmp, "wire test"));
+  const headSha = (await core.getLog(tmp, { maxCount: 1 })).commits[0].sha;
+  wireCheck("diff", await core.getDiff(tmp, { scope: "commit", sha: headSha }));
+  wireCheck("diff", await core.getDiff(tmp, { scope: "compare", base: "HEAD~1", target: "HEAD" }));
+  const logAfter = await core.getLog(tmp, { maxCount: 50 });
+  wireCheck("log", Object.assign({}, logAfter, { graph: computeGraph(logAfter.commits) }));
 });
 
 // ============================================================================

@@ -182,7 +182,7 @@ export async function probeRepo(path) {
   const merging = existsSync(join(gitDirAbs, "MERGE_HEAD"));
   const rebasing = existsSync(join(gitDirAbs, "rebase-merge")) || existsSync(join(gitDirAbs, "rebase-apply"));
 
-  return {
+  const out = {
     isRepo: true,
     toplevel,
     gitDir,
@@ -195,8 +195,10 @@ export async function probeRepo(path) {
     merging,
     rebasing,
     isLinkedWorktree,
-    mainWorktreePath,
   };
+  // 网关 assertJsonValue 会拒绝显式 undefined 的 own key——defined 才带上
+  if (mainWorktreePath !== undefined) out.mainWorktreePath = mainWorktreePath;
+  return out;
 }
 
 // ============================================================================
@@ -517,7 +519,8 @@ export function parseWorktreePorcelain(text) {
   const records = normalized.split(/\n\s*\n/);
   for (const rec of records) {
     if (rec.trim().length === 0) continue;
-    const item = { path: null, headSha: null, branch: null, detached: false, bare: false, locked: false, prunable: null };
+    // prunable 不能是 null（typert union(boolean,string) 不含 null），默认 false
+    const item = { path: null, headSha: null, branch: null, detached: false, bare: false, locked: false, prunable: false };
     for (const line of rec.split("\n")) {
       const idx = line.indexOf(" ");
       let key, value;
