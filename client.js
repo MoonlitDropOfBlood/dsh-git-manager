@@ -61,7 +61,7 @@ window.__ModuleLoader__.load({
 .gm-badge-behind{color:var(--dsw-alias-state-error-primary);font-weight:500}
 
 /* Repo select + header controls */
-.gm-select{box-sizing:border-box;height:30px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:0 8px;outline:none;max-width:280px}
+.gm-head-path{font-size:12px;color:var(--dsw-alias-label-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gm-input{box-sizing:border-box;height:30px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:0 10px;outline:none}
 .gm-btn{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
 .gm-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
@@ -241,13 +241,11 @@ window.__ModuleLoader__.load({
       const targetPath = useTargetPath();
       const slotProps = props.slotProps || {};
       const useSessions = slotProps.useSessions;
-      const useWorkspaces = slotProps.useWorkspaces;
 
-      // 仓库候选：当前会话 cwd + workspaces + 手动输入
+      // 面板绑定打开它的那个会话目录（targetPath 在点击入口时捕获），不提供切换——
+      // 从哪个会话的入口点开就管哪个仓库（用户反馈：可切换不符合直觉）。
       const currentSessionCwd = useSessions ? useSessions((s) => (s.current && s.byId[s.current] ? s.byId[s.current].cwd : null)) : null;
-      const workspaces = useWorkspaces ? useWorkspaces((s) => s.items) : [];
-
-      const [repoPath, setRepoPath] = React.useState(() => targetPath || currentSessionCwd || (workspaces[0] && workspaces[0].path) || "");
+      const repoPath = targetPath || currentSessionCwd || "";
       const [probe, setProbe] = React.useState(null);
       const [status, setStatus] = React.useState(null);
       const [remotes, setRemotes] = React.useState([]);
@@ -303,16 +301,7 @@ window.__ModuleLoader__.load({
 
       const head = React.createElement("div", { className: "gm-head" },
         React.createElement("span", { className: "gm-head-title" }, "Git 管理"),
-        React.createElement("select", {
-          className: "gm-select",
-          value: repoPath,
-          onChange: (e) => setRepoPath(e.target.value),
-          title: "选择仓库目录",
-        },
-          currentSessionCwd ? React.createElement("option", { key: "cwd", value: currentSessionCwd }, "当前会话：" + currentSessionCwd) : null,
-          workspaces.map((w) => React.createElement("option", { key: w.workspaceId, value: w.path }, "Workspace: " + (w.title || w.path))),
-          remotes.map((r) => React.createElement("option", { key: r.name + "-f", value: repoPath }, r.name + ": " + (r.fetchUrl || ""))).slice(0, 0),
-        ),
+        React.createElement("span", { className: "gm-head-path", title: repoPath }, repoPath),
         React.createElement("span", { className: "gm-head-spacer" }),
         React.createElement("div", { className: "gm-head-actions" },
           status && probe && !probe.detached && (status.ahead > 0 || status.behind > 0) ? React.createElement("span", { className: "gm-badge", style: { fontSize: 12 }, title: "与远端的差距：↑ 本地领先提交数，↓ 本地落后提交数" },
