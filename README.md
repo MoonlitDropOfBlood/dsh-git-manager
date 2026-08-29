@@ -44,10 +44,9 @@ npm test         # 自测（解析器 fixture + 临时仓库 live 集成）
 
 ## 发布
 
-打 `v1.0.0` 标签推到 GitHub，`.github/workflows/release.yml` 自动构建并发布 GitHub Release。
+打 `v*` 标签推到 GitHub：`.github/workflows/release.yml` 自动跑测试、构建 tgz、发布 GitHub Release，并通过 OIDC Trusted Publishing 发布到 npm（已存在的版本自动跳过，可安全重放）。
 
-npm 发布（本机 `npm_config_registry` 默认指向 npmmirror，必须显式覆盖）：
-
-```bash
-npm publish --registry=https://registry.npmjs.org
-```
+> 首版 bootstrap：新包在 npmjs.com 尚无 trusted publisher 配置，先在本地发一次
+> `npm publish --registry=https://registry.npmjs.org`，再到包设置里配置
+> trusted publisher（repo `MoonlitDropOfBlood/dsh-git-manager` + workflow `.github/workflows/release.yml`），
+> 之后的版本只需打标签推送。
