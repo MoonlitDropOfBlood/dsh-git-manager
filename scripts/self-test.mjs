@@ -14,7 +14,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { join, sep, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
@@ -891,15 +891,23 @@ test("addWorktree / removeWorktree / pruneWorktrees 完整链路", async () => {
 // Review feedback (Critical/Important) 新增测试
 // ============================================================================
 
+// Windows git 输出正斜杠 toplevel（如 D:/repo）——这正是要测的形态；
+// posix 下正斜杠即原生分隔符，用普通绝对路径等价覆盖（CI 跑在 Linux 上）。
+const SAFEJOIN_ROOT = process.platform === "win32" ? "D:/ai-projects/dsh/dsh-git-manager" : "/tmp/gm-safejoin-repo";
+
 test("safeJoin: 正斜杠 toplevel（Windows git 输出）允许相对路径", () => {
-  const abs = core.safeJoin("D:/ai-projects/dsh/dsh-git-manager", "sub/file.txt");
-  check("含反斜杠或正斜杠分隔的 toplevel 前缀", /^D:[\\/]ai-projects[\\/]dsh[\\/]dsh-git-manager[\\/]sub[\\/]file\.txt$/.test(abs));
+  const abs = core.safeJoin(SAFEJOIN_ROOT, "sub/file.txt");
+  const norm = (p) => p.replace(/\\/g, "/");
+  check("结果以规范化 toplevel 为前缀", norm(abs) === norm(resolve(SAFEJOIN_ROOT)) + "/sub/file.txt");
 });
 
 test("safeJoin: 绝对路径拒绝", () => {
-  let caught;
-  try { core.safeJoin("D:/repo", "C:/elsewhere/file"); } catch (e) { caught = e; }
-  check("抛 GitError", caught instanceof core.GitError);
+  // 两种绝对形态（盘符 /  posix 根）在任一平台都必须拒绝
+  for (const evil of ["C:/elsewhere/file", "/etc/elsewhere/passwd"]) {
+    let caught;
+    try { core.safeJoin("D:/repo", evil); } catch (e) { caught = e; }
+    check("抛 GitError: " + evil, caught instanceof core.GitError);
+  }
 });
 
 test("safeJoin: .. 越界拒绝", () => {
