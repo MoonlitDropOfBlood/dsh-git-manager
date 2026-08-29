@@ -45,6 +45,7 @@ window.__ModuleLoader__.load({
 .gm-tab-badge{margin-left:auto;font-size:10px;line-height:14px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-primary-inverted);min-width:14px;text-align:center}
 .gm-content{flex:1;min-width:0;overflow:auto;padding:14px 16px}
 .gm-error{padding:8px 14px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);font-size:12px;margin-bottom:10px;white-space:pre-wrap}
+.gm-notice{padding:8px 14px;border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent);color:var(--dsw-alias-state-success-primary);font-size:12px;margin-bottom:10px}
 .gm-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--dsw-alias-border-l1);border-top-color:var(--dsw-alias-brand-primary);animation:gm-spin .8s linear infinite;flex:none;display:inline-block;vertical-align:middle}
 @keyframes gm-spin{to{transform:rotate(360deg)}}
 .gm-empty{padding:36px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
@@ -378,7 +379,22 @@ window.__ModuleLoader__.load({
       );
 
       // Tab content：每个 Tab 的真实实现（Tasks 14-17）
-      const tabProps = { remote, repoPath, status, act, setError, onStatus: setStatus, onSwitchTab: setTab };
+      // worktreeAdd 成功后把新 worktree 注册为 DSH 工作区（host 侧按 canonical
+      // 路径去重，重复注册安全）——这样它在 workspace-write 沙盒下天然可写
+      // （writableRoots 只含 workspaceRoot + tmp，见 dsh-sandbox）。
+      const workspacesService = props.workspaces;
+      const registerWorkspace = async (wtPath) => {
+        if (!workspacesService || typeof workspacesService.create !== "function") return null;
+        try {
+          const r = await workspacesService.create({ path: wtPath });
+          if (r && r.ok === false) return null;
+          return "已注册为 DSH 工作区（侧栏可直接打开，沙盒内可写）";
+        } catch (_) {
+          return null;
+        }
+      };
+
+      const tabProps = { remote, repoPath, status, act, setError, onStatus: setStatus, onSwitchTab: setTab, registerWorkspace };
       const tabContent = (() => {
         if (!probe || !probe.isRepo) {
           return React.createElement("div", { className: "gm-empty" }, "该目录不是 Git 仓库。点击上方「初始化为 git 仓库」开始，或选择其他目录。");
@@ -946,6 +962,7 @@ window.__ModuleLoader__.load({
       const [worktrees, setWorktrees] = React.useState(null);
       const [adding, setAdding] = React.useState({ path: "", newBranch: "" });
       const [confirming, setConfirming] = React.useState(null);
+      const [notice, setNotice] = React.useState(null);
 
       const refresh = async () => {
         const r = await unwrap(await remote.worktrees({ path: repoPath }));
@@ -956,12 +973,20 @@ window.__ModuleLoader__.load({
 
       const doAdd = async () => {
         if (!adding.path) return;
-        await act("worktreeAdd", () => remote.worktreeAdd({
+        const wtPath = adding.path;
+        setNotice(null);
+        const v = await act("worktreeAdd", () => remote.worktreeAdd({
           path: repoPath,
-          worktreePath: adding.path,
+          worktreePath: wtPath,
           newBranch: adding.newBranch || undefined,
         }));
         setAdding({ path: "", newBranch: "" });
+        refresh();
+        // act 失败时返回 undefined；只在添加成功时注册工作区
+        if (v !== undefined && props.registerWorkspace) {
+          const msg = await props.registerWorkspace(wtPath);
+          if (msg) setNotice(msg);
+        }
       };
       const doRemove = async (wtPath, force) => {
         setConfirming(null);
@@ -976,6 +1001,7 @@ window.__ModuleLoader__.load({
       if (!worktrees) return React.createElement("div", { className: "gm-empty" }, "加载 Worktree…");
 
       return React.createElement(React.Fragment, null,
+        notice ? React.createElement("div", { className: "gm-notice" }, notice) : null,
         React.createElement("div", { className: "gm-filegroup" },
           React.createElement("div", { className: "gm-filegroup-head" },
             React.createElement("span", null, "Worktree (" + worktrees.length + ")"),
@@ -1026,6 +1052,8 @@ window.__ModuleLoader__.load({
 
       // ctx.get 不受 inject 属性守卫限制（与 archive-manager 同款）
       const remote = ctx.get("remote.gitManager");
+      // 客户端 workspaces 服务（核心服务，恒在；create({path}) host 侧按 canonical 路径去重）
+      const workspaces = ctx.get("workspaces");
 
       // ① Composer 工具行入口（conversation.input.left，模式/access-mode 选择器旁）
       //    该槽有完整标准 kit（含 useSessions），只需注入 remote。
@@ -1058,7 +1086,7 @@ window.__ModuleLoader__.load({
           return ReactDOM.createPortal(
             React.createElement("div", { className: "gm-overlay", role: "presentation" },
               React.createElement("div", { className: "gm-mask", "aria-hidden": true, onClick: close }),
-              React.createElement(GitPanel, { slotProps: props, remote, onClose: close }),
+              React.createElement(GitPanel, { slotProps: props, remote, workspaces, onClose: close }),
             ),
             document.body,
           );

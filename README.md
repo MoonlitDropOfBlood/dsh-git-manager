@@ -13,7 +13,7 @@ DSH 正式 bundle 插件：在 DeepSeek Harness Web UI 里直接管理 Git 工�
 | **分支** | 本地 / 远程列表（upstream、ahead/behind），新建（带起点） / 切换 / 改名 / 删除（未合并且无 -D 二次确认） / 合并；与当前分支对比 diff |
 | **历史** | **分支线** 图形（基于 `git log --all --date-order` + Host 侧 computeGraph 布局，Client 纯 SVG 渲染） + refs 徽章 + 加载更多；点击提交查看 commit diff |
 | **冲突** | 合并进行中横幅（继续 / 中止）+ 每文件三种解决方式：ours / theirs / 手动编辑（base/ours/theirs 三栏对照 + 可编辑区） |
-| **Worktree** | 列表 + 添加（可带新分支）+ 删除（脏目录需 force 二次确认）+ prune |
+| **Worktree** | 列表 + 添加（可带新分支；成功后自动注册为 DSH 工作区，workspace-write 沙盒下即可写）+ 删除（脏目录需 force 二次确认）+ prune |
 
 ## 安全 / 体验
 
