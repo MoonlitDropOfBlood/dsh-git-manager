@@ -9,7 +9,10 @@
 - 唯一入口在 composer 工具行「模式」（access-mode）选择器旁（`conversation.input.left` 槽），hero 空白会话与会话内都渲染这一行；**仅当目标目录是 git 仓库时显示**（probe 60s 轮询缓存，非仓库返回 null）。顶部无其他入口（头部徽章已按用户决策移除）。
 - 弹窗尺寸/结构与「设置」面板完全一致：`width:800px; max-width:calc(100vw - 48px); height:min(800px,100vh - 48px); border-radius:24px; background:--dsw-alias-bg-layer-2; box-shadow:--dsw-shadow-lv3`；mask 层 `--dsw-alias-bg-mask-1 + --dsw-mask-blur`，mask 点击与 document 级 Esc 都关闭。
 - 同一个 `shell.overlay` 全屏面板，五 Tab：变更 / 分支 / 历史 / 冲突 / Worktree。
-- 历史 Tab 的分支线由 Host 侧 `git-graph.mjs` 的 `computeGraph` 算好 layout，Client 纯 SVG 渲染。
+- 历史 Tab 的分支线由 Host 侧 `git-graph.mjs` 的 `computeGraph` 算好 layout，Client 纯 SVG 渲染；**列宽随车道数自适应**（≤8 车道 14px，更多时 `150/lanes` 且最小 5px），图形区封顶 ~170px，防止分支多时把提交内容挤变形。**渲染分层降噪**（设计见 `docs/plans/2026-09-01-history-graph-declutter.md`）：parent 竖线 opacity 0.45 当背景骨架、merge 斜线 0.7/1.25px、collapse 0.55；跨度 >24 行的边做三段式省略（两端实线 stub + 中段 `2 4` 虚线 + 窗口外父画底边 ▾）；悬停某提交时其祖先/后代边 opacity 0.95 加粗并最后绘制（置顶），无关边降到 0.25 倍透明度、无关节点 0.35。
+- **diff 一律在独立弹窗（`.gm-diffwin`，Portal 落 body，z-index 1050）中查看**：变更 Tab 点文件、历史 Tab 点提交都会开窗；窗口 Esc/mask 点击只关自身不关面板（模块级 `modalDepth` 计数，面板 Esc 处理器在 `modalDepth>0` 时不动作）。历史提交的 diff 只读；变更 Tab 的 diff 支持 **hunk 级操作**（IDEA 式逐块）：未暂存 diff 每块有「撤销此块」（危险红，二次确认），已暂存 diff 每块有「取消暂存此块」（改动移回工作区不丢内容）。
+- hunk 操作由 Host `hunkApply` 实现：`getDiff` 重取该文件当前 diff → `extractHunkPatch` 纯函数切出"文件头 + 单 hunk"最小补丁 → 写临时 patch 文件 → `git apply --reverse`（worktree 撤销）或 `git apply --reverse --cached`（取消暂存）；safeJoin 路径防护与 discard 同一道闸，且**必须在 probe.toplevel 跑**（patch 内是仓库根相对路径，cwd 为子目录会匹配不到）。
+- **cherry-pick**：历史 Tab 提交 diff 窗口头部「Cherry-pick 到当前分支」按钮（非破坏操作，无二次确认）。Host `cherryPick` 与 merge 同款契约：干净拣选返回 `{picked:true,status}`；**冲突不抛错**，返回 `picked:false` + status，仓库进 CHERRY_PICK_HEAD 态 → 客户端关窗跳冲突页，解决后「继续」（`mergeContinue` = `git commit --no-edit`，MERGE_MSG 已备好原提交信息）完成 pick，「中止操作」走 `abortMerge` 的 `git cherry-pick --abort` 分支（也支持 REVERT_HEAD → `revert --abort`）。sha 入参白名单校验纯十六进制。
 - 全屏面板用 `ReactDOM.createPortal(..., document.body)` 落到 body 层（z-index 1000），绕开 `shell.overlay` 槽位宿主 stacking context 的 z-index 锁死问题（详见注意事项 §1）。
 
 ## 目录结构
@@ -50,7 +53,7 @@ export class GitManagerService extends TypertRemoteService {
   constructor(ctx, config) { super(ctx, "gitManager"); }
   [Service.init]() {
     markRemoteMethod(this, "probe", "probe");
-    // ...全部 27 个方法
+    // ...全部 29 个方法
   }
   async probe(request) { /* runGit + 解析 → 返回 ok:true,value */ }
 }
@@ -99,7 +102,7 @@ window.__ModuleLoader__.load({
 
 `--date-order` 保证父提交晚于子提交出现；toRow > fromRow 恒成立（单测断言）。
 
-Client 渲染时：固定 `ROW_H=32, COL_W=14`，调色板 12 色写死；同列用竖线、跨列用 cubic bezier 曲线、`toRow=null`（窗口外父）画到 SVG 底部、节点圆 `fill=PALETTE[color]`。
+Client 渲染时：固定 `ROW_H=32`，`COL_W` 随车道数自适应（≤8 车道 14px，更多时 `150/lanes` 且最小 5px，图形区封顶 ~170px），调色板 12 色写死；同列用竖线、跨列用 cubic bezier 曲线、`toRow=null`（窗口外父）画到 SVG 底部、节点圆 `fill=PALETTE[color]`。
 
 ## 开发 / 验证
 
@@ -124,7 +127,7 @@ dsh plugin --profile web add D:\ai-projects\dsh\dsh-git-manager   # 本地安装
 - **factory 作用域没有 `remote`（实测踩坑）**：组件都定义在 bundle factory 作用域，而 `remote = ctx.get("remote.gitManager")` 是 `apply()` 的局部变量——组件里裸引用 `remote` 会 ReferenceError。若抛在**异步 effect** 里则不崩 React 树、组件只是静默永不渲染（曾有组件因此长期不可见且无任何报错）。规则：组件一律从 `props.remote` 取，由 apply 内 wrapper（`ComposerGitButtonSlot`）注入；self-test 有静态守卫。
 - **路径归一化（review 教训）**：`safeJoin` 接收 `git rev-parse --show-toplevel` 输出的 toplevel；Windows git 输出**正斜杠**（如 `D:/repo`），而 `node:path.resolve` 归一为**反斜杠**（`D:\repo`）。如果直接 `startsWith(toplevel + sep)` 会永远 false，所有合法路径被误判越界。正确做法：`const root = resolve(toplevel)`，再用 `startsWith(root + sep)`。
 - **MERGE_HEAD 路径（review 教训）**：`git rev-parse --git-dir` 在 cwd=toplevel 时返回相对路径 `.git`；`existsSync(join(gitDir, "MERGE_HEAD"))` 必须先 `resolve(cwd, gitDir)` 归一化到绝对路径，否则 MERGE_HEAD 检测落到 DSH 进程 cwd 上、永远 false，合并进行中 banner 不会出现。
-- **continueMerge 守门**：MERGE_HEAD / rebase-merge / rebase-apply 任一不存在时**必须抛错**——否则 `git commit --no-edit` 会提交 staged 内容，得到一个意外的"空 commit"。`git-core.mjs:continueMerge` 已加守卫。
+- **continueMerge 守门**：MERGE_HEAD / CHERRY_PICK_HEAD / REVERT_HEAD / rebase-merge / rebase-apply 全部不存在时**必须抛错**——否则 `git commit --no-edit` 会提交 staged 内容，得到一个意外的"空 commit"。`git-core.mjs:continueMerge` 已加守卫（cherry-pick/revert 冲突解决后同样由此完成，commit 成功自动清状态文件）。
 - **不要直接编辑 `~/.dsh/profiles/web/cordis.yml`**（生成文件，patch 覆盖在 `cordis.patch.yml`）。
 - `cordis.patch.yml` 顶层是 patch 数组：`- insert:` 新增、`- id:` 覆盖。
 - `client.js` 用 `require("react")` 与 `require("react-dom")`（bundle 模块表提供），**不要** `import`；不用动态插件的 styles/host 全局。
@@ -132,6 +135,7 @@ dsh plugin --profile web add D:\ai-projects\dsh\dsh-git-manager   # 本地安装
 - typert result schema 是 strict：Host 返回结构与 schema 逐字段一致。
 - 危险操作全部 UI 二次确认；force push 只用 `--force-with-lease`。
 - **skip-live 不算 PASS**：`scripts/self-test.mjs` 在 git 不可用时跳过 live 测试并以 exit 1 退出——把"绿"误读为通过会让静默跳过的 bug 上线。CI 跑测试必须用真实 git。
+- **`git apply` 会按 smudge 过滤器重写行尾（实测）**：在 `core.autocrlf=true` 的机器上，`git apply --reverse` 还原 hunk 后整个文件变 CRLF（git status 因归一化不显示差异，行为同 `git restore`，属正常 git 语义）——但自测里对文件内容做逐行断言必须先 `.replace(/\r\n/g, "\n")` 归一化，否则在这类机器上必挂。
 - **Remote 返回值必须「网关 JSON-safe」（大坑，实测）**：dsh-api-gateway 的 `decode()` 在 zod parse **之后**还跑 `assertJsonValue`——显式 `undefined` 的 own key（zod `.optional()` 会原样放行 parse 输出里的 undefined！）、schema 声明外的 `null`（如 `union(boolean,string)` 里塞 null）、非 plain object、循环引用，一律抛 `business result failed boundary validation`，**客户端 RPC 永久 pending、无任何报错，UI 静默无数据**（实测症状：入口按钮在真仓库里也不出现，因为 probe 响应被网关吞了）。规则：可选字段**有值才挂 key**（`if (x !== undefined) out.x = x`），union 里的空值用 `false`/`""` 不要用 `null`。self-test 的 `wire:` 守卫会用真实 git 仓库的返回值跑 strict schema + 等价 assertJsonSafe 复刻——**新增/修改 Remote 方法的返回结构必须过它**。
 - **headless `--dump-dom` 抓不到"RPC 回来才渲染"的组件（实测）**：Edge headless 在 virtual-time 耗尽时 dump，不等真实 fetch 往返——像 ComposerGitButton 这种 probe 门控的组件在 dump 里永远缺席，stderr console 也有截断/丢失。验证这类 UI 用 CDP：`--remote-debugging-port=9223` 起 headless Edge，然后 `node scripts/cdp-e2e.mjs <pageUrl> 9223 8000`（Node 内置 fetch/WebSocket 连 `/json/list` 拿 target，真实 sleep 后 `Runtime.evaluate` 读 DOM 与 console）。
 - **worktreeAdd 成功后会自动把新 worktree 注册为 DSH 工作区**（client 侧 `ctx.get("workspaces").create({path})`，host 侧 `createCanonical` 按 canonical 路径去重，重复注册安全）。动机：DSH 文件沙盒 `writableRoots` = `workspaceRoot + /tmp + tmpdir()`（`dsh-sandbox` 纯路径前缀判定，**无 git/worktree 感知、无注入点**），worktree 建在工作区外时 agent 在 workspace-write 下不可写；注册为工作区后开会话即成为 workspaceRoot。UI 反馈：Worktree tab 顶部 `.gm-notice` 绿色提示。服务不可用时静默跳过（不报错）。

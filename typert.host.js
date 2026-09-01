@@ -160,6 +160,12 @@ const mergeValueSchema = z.object({
   merged: z.boolean().readonly(),
   status: statusSchema,
 }).readonly();
+// cherry-pick 与 merge 同款契约：冲突时 picked=false 不抛错，
+// 仓库进 CHERRY_PICK_HEAD 态，交冲突页解决后 mergeContinue 完成 pick
+const cherryPickValueSchema = z.object({
+  picked: z.boolean().readonly(),
+  status: statusSchema,
+}).readonly();
 const fetchValueSchema = z.object({
   output: z.string().readonly(),
   status: statusSchema,
@@ -202,6 +208,7 @@ const conflictContentResult = result(conflictContentValueSchema);
 const mutationResult = result(statusOnlySchema);
 const commitResult = result(commitValueSchema);
 const mergeResult = result(mergeValueSchema);
+const cherryPickResult = result(cherryPickValueSchema);
 const fetchResult = netResult(fetchValueSchema);
 const worktreeMutResult = result(worktreesValueSchema);
 const initResult = result(z.object({ probe: probeSchema }).readonly());
@@ -221,6 +228,7 @@ const METHODS = [
   ["stage", mutationResult],
   ["unstage", mutationResult],
   ["discard", mutationResult],
+  ["hunkApply", mutationResult],
   ["commit", commitResult],
   ["branchCreate", mutationResult],
   ["checkout", mutationResult],
@@ -229,6 +237,7 @@ const METHODS = [
   ["merge", mergeResult],
   ["mergeAbort", mutationResult],
   ["mergeContinue", mutationResult],
+  ["cherryPick", cherryPickResult],
   ["resolveConflict", mutationResult],
   ["fetch", fetchResult],
   ["pull", fetchResult],

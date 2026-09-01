@@ -13,6 +13,8 @@ import { execFile } from "node:child_process";
 import { rm, writeFile, readFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import { resolve, join, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 
 // ============================================================================
 // runGit 封装
@@ -625,6 +627,100 @@ export async function getDiff(cwd, opts = {}) {
 }
 
 // ============================================================================
+// 变更：hunk 级补丁（IDEA 式逐块操作：撤销此块 / 取消暂存此块）
+// ============================================================================
+
+// 从完整 unified diff 文本中提取"某文件的第 hunkIndex 个块"，拼成可独立
+// `git apply` 的最小补丁（文件头 + 单个 hunk）。纯函数，便于 fixture 测试。
+export function extractHunkPatch(diffText, file, hunkIndex) {
+  if (typeof diffText !== "string" || diffText.length === 0) {
+    throw new GitError("exit", "没有可用的 diff 文本");
+  }
+  if (typeof file !== "string" || file.length === 0) {
+    throw new GitError("exit", "hunk 操作需要 file");
+  }
+  const idx = Number(hunkIndex);
+  if (!Number.isInteger(idx) || idx < 0) {
+    throw new GitError("exit", "非法 hunkIndex：" + hunkIndex);
+  }
+  // 按 "diff --git " 切文件段；段内：@@ 之前是文件头，之后每 @@ 开一个 hunk，
+  // "\ No newline at end of file" 等尾随行归入当前 hunk。
+  const sections = [];
+  let cur = null;
+  for (const line of diffText.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      cur = { headerLines: [line], hunks: [], curHunk: null };
+      sections.push(cur);
+    } else if (!cur) {
+      continue; // diff 之前的行（如 git show 的提交头）
+    } else if (line.startsWith("@@")) {
+      cur.curHunk = [line];
+      cur.hunks.push(cur.curHunk);
+    } else if (cur.curHunk) {
+      cur.curHunk.push(line);
+    } else {
+      cur.headerLines.push(line);
+    }
+  }
+  const unquote = (p) => (p && p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1) : p);
+  const wantNew = "b/" + file;
+  const wantOld = "a/" + file;
+  let target = null;
+  for (const s of sections) {
+    let newPath = null;
+    let oldPath = null;
+    for (const h of s.headerLines) {
+      if (h.startsWith("+++ ")) newPath = unquote(h.slice(4));
+      else if (h.startsWith("--- ")) oldPath = unquote(h.slice(4));
+    }
+    if (newPath === wantNew || oldPath === wantOld) { target = s; break; }
+    // 兜底：diff --git a/<old> b/<new> 首行整体匹配
+    if (s.headerLines[0] === "diff --git " + wantOld + " " + wantNew) { target = s; break; }
+  }
+  if (!target) throw new GitError("exit", "diff 中找不到文件：" + file);
+  if (idx >= target.hunks.length) {
+    throw new GitError("exit", "hunkIndex 越界：" + idx + "（该文件共 " + target.hunks.length + " 块）");
+  }
+  const patch = target.headerLines.concat(target.hunks[idx]).join("\n");
+  return patch.endsWith("\n") ? patch : patch + "\n";
+}
+
+// 对单个 hunk 执行反向应用：
+//   scope=worktree → git apply --reverse        把工作区该块恢复成 index 版本（IDEA「撤销」）
+//   scope=staged   → git apply --reverse --cached 把该块移出暂存区（改动保留在工作区）
+// 返回最新 status（与其他 mutation 一致）。
+export async function applyHunk(cwd, opts = {}) {
+  const scope = opts.scope;
+  if (scope !== "worktree" && scope !== "staged") {
+    throw new GitError("exit", "hunkApply 只支持 scope=worktree（撤销此块）/ staged（取消暂存此块）");
+  }
+  const file = opts.file;
+  if (typeof file !== "string" || file.length === 0) {
+    throw new GitError("exit", "hunkApply 需要 file");
+  }
+  const probe = await probeRepo(cwd);
+  if (!probe.isRepo) throw new GitError("not-a-repo", "hunkApply：仓库不可用");
+  // 路径防护：与 discard 同一道闸（拒绝绝对路径 / .. 越界）
+  safeJoin(probe.toplevel, file);
+  // patch 内路径是仓库根相对路径，getDiff/git apply 都必须在 toplevel 跑
+  // （cwd 是子目录时 git diff -- <根相对路径> 会匹配不到）。
+  const top = probe.toplevel;
+  const diff = await getDiff(top, { scope, file });
+  const patch = extractHunkPatch(diff.text, file, opts.hunkIndex);
+  const tmpFile = join(tmpdir(), "dsh-gm-hunk-" + process.pid + "-" + randomBytes(6).toString("hex") + ".patch");
+  try {
+    await writeFile(tmpFile, patch, "utf8");
+    const args = ["apply", "--reverse", "--whitespace=nowarn"];
+    if (scope === "staged") args.push("--cached");
+    args.push(tmpFile);
+    await runGit(top, args);
+  } finally {
+    await rm(tmpFile, { force: true });
+  }
+  return getStatus(top);
+}
+
+// ============================================================================
 // 变更：stage / unstage / discard / commit
 // ============================================================================
 
@@ -750,24 +846,69 @@ export async function mergeBranch(cwd, branch, noFf) {
 }
 
 export async function abortMerge(cwd) {
-  await runGit(cwd, ["merge", "--abort"]);
+  // 按进行中的操作类型选择 abort 命令：merge / cherry-pick / revert 状态互斥，
+  // `git merge --abort` 对 cherry-pick 状态无效（反之亦然）。
+  const probe = await probeRepo(cwd);
+  if (!probe.isRepo) throw new GitError("not-a-repo", "abortMerge：仓库不可用");
+  const gitDirAbs = resolve(cwd, probe.gitDir);
+  if (existsSync(join(gitDirAbs, "CHERRY_PICK_HEAD"))) {
+    await runGit(cwd, ["cherry-pick", "--abort"]);
+  } else if (existsSync(join(gitDirAbs, "REVERT_HEAD"))) {
+    await runGit(cwd, ["revert", "--abort"]);
+  } else {
+    await runGit(cwd, ["merge", "--abort"]);
+  }
   return getStatus(cwd);
 }
 
 export async function continueMerge(cwd) {
-  // 守门：MERGE_HEAD 不存在时 `git commit --no-edit` 会提交当前 staged 内容，
-  // 用户误点会得到一个"意外空 commit"——必须先校验。
+  // 守门：MERGE_HEAD / CHERRY_PICK_HEAD / REVERT_HEAD / rebase 目录都不存在时，
+  // `git commit --no-edit` 会提交当前 staged 内容，用户误点会得到一个
+  // "意外空 commit"——必须先校验。
+  // cherry-pick/revert 冲突解决后同样由 `git commit --no-edit` 完成
+  //（MERGE_MSG 已备好原提交信息，commit 成功自动清状态文件）。
   const probe = await probeRepo(cwd);
   if (!probe.isRepo) throw new GitError("not-a-repo", "continueMerge：仓库不可用");
   const gitDirAbs = resolve(cwd, probe.gitDir);
   const inMerge = existsSync(join(gitDirAbs, "MERGE_HEAD"))
+    || existsSync(join(gitDirAbs, "CHERRY_PICK_HEAD"))
+    || existsSync(join(gitDirAbs, "REVERT_HEAD"))
     || existsSync(join(gitDirAbs, "rebase-merge"))
     || existsSync(join(gitDirAbs, "rebase-apply"));
   if (!inMerge) {
-    throw new GitError("exit", "当前不在合并/变基中，无可继续的操作");
+    throw new GitError("exit", "当前不在合并/变基/cherry-pick 中，无可继续的操作");
   }
   await runGit(cwd, ["commit", "--no-edit"]);
   return getStatus(cwd);
+}
+
+// cherry-pick 单个提交到当前分支。
+// 冲突时不抛错（与 mergeBranch 同款契约）：返回 { picked:false, status }，
+// 仓库进入 CHERRY_PICK_HEAD 状态 → 冲突页解决后「继续」即完成 pick，
+// 「中止」走 abortMerge 的 cherry-pick --abort 分支。
+// 其他失败（空 pick、工作区脏导致无法应用等）原样抛 GitError。
+export async function cherryPickCommit(cwd, sha) {
+  // sha 白名单校验：虽然 execFile argv 不拼 shell，仍收紧到纯十六进制
+  if (typeof sha !== "string" || !/^[0-9a-fA-F]{4,64}$/.test(sha)) {
+    throw new GitError("exit", "cherryPick 需要合法 commit sha（4-64 位十六进制）");
+  }
+  let picked = true;
+  try {
+    await runGit(cwd, ["cherry-pick", sha]);
+  } catch (e) {
+    if (e instanceof GitError && e.kind === "exit") {
+      const st = await getStatus(cwd);
+      if (st.conflicted.length > 0 || /conflict/i.test(e.stderr || "")) {
+        picked = false;
+      } else {
+        throw e;
+      }
+    } else {
+      throw e;
+    }
+  }
+  const status = await getStatus(cwd);
+  return { picked, status };
 }
 
 // ============================================================================

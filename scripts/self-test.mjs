@@ -1039,6 +1039,140 @@ test("fetchRemote / pullBranch / pushBranch: 本地 bare remote + real git fetch
 });
 
 // ============================================================================
+// extractHunkPatch：从完整 diff 中提取单文件单 hunk 的最小补丁（纯函数 fixture）
+// ============================================================================
+
+test("extractHunkPatch: 多文件多 hunk 中精确提取指定块", () => {
+  const diff = [
+    "diff --git a/a.txt b/a.txt",
+    "index 1111111..2222222 100644",
+    "--- a/a.txt",
+    "+++ b/a.txt",
+    "@@ -1,3 +1,3 @@",
+    " a1",
+    "-a2",
+    "+a2x",
+    " a3",
+    "diff --git a/b.txt b/b.txt",
+    "index 3333333..4444444 100644",
+    "--- a/b.txt",
+    "+++ b/b.txt",
+    "@@ -1,2 +1,2 @@",
+    " b1",
+    "-b2",
+    "+b2x",
+    "@@ -10,2 +10,2 @@",
+    " b10",
+    "-b11",
+    "+b11x",
+    "",
+  ].join("\n");
+  const p0 = core.extractHunkPatch(diff, "b.txt", 0);
+  check("含完整文件头", p0.includes("diff --git a/b.txt b/b.txt") && p0.includes("index 3333333") && p0.includes("--- a/b.txt") && p0.includes("+++ b/b.txt"));
+  check("只含第一个 hunk", p0.includes("@@ -1,2 +1,2 @@") && !p0.includes("@@ -10,2 +10,2 @@"));
+  check("不串到别的文件", !p0.includes("a2x"));
+  const p1 = core.extractHunkPatch(diff, "b.txt", 1);
+  check("第二个 hunk", p1.includes("@@ -10,2 +10,2 @@") && !p1.includes("b2x"));
+  check("补丁以换行结尾", p1.endsWith("\n"));
+  let threw = false;
+  try { core.extractHunkPatch(diff, "nope.txt", 0); } catch (_) { threw = true; }
+  check("未知文件抛错", threw);
+  threw = false;
+  try { core.extractHunkPatch(diff, "b.txt", 5); } catch (_) { threw = true; }
+  check("hunkIndex 越界抛错", threw);
+});
+
+live("applyHunk: worktree 撤销指定块 / staged 取消暂存指定块", async (tmp) => {
+  // 造两个相距足够远的 hunk（行 2 与行 18，context 3 不会合并）
+  const lines = [];
+  for (let i = 1; i <= 20; i++) lines.push("line" + i);
+  await writeFile(join(tmp, "multi.txt"), lines.join("\n") + "\n");
+  await runShell(tmp, ["git", "add", "multi.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "multi"]);
+  lines[1] = "line2-changed";
+  lines[17] = "line18-changed";
+  await writeFile(join(tmp, "multi.txt"), lines.join("\n") + "\n");
+
+  // worktree：撤销第 0 块（line2），line18 改动必须保留
+  let st = await core.applyHunk(tmp, { scope: "worktree", file: "multi.txt", hunkIndex: 0 });
+  // 归一化行尾：autocrlf=true 的机器上 git apply 会按 smudge 过滤器写出 CRLF，
+  // 内容语义不变，断言必须对行尾不敏感。
+  const after = (await readFile(join(tmp, "multi.txt"), "utf8")).replace(/\r\n/g, "\n").split("\n");
+  check("第 0 块已撤销（line2 还原）", after[1] === "line2");
+  check("第 1 块保留（line18 还是改动后）", after[17] === "line18-changed");
+  check("文件仍在 unstaged（还剩一块）", st.unstaged.some((e) => e.path === "multi.txt"));
+
+  // staged：先把 line2 改回去让暂存 diff 含两个块（此时 index 里只有 line18），
+  // 再整体 stage 后把第 0 块移出暂存区（改动回到 unstaged，内容不丢）
+  lines[1] = "line2-changed";
+  await writeFile(join(tmp, "multi.txt"), lines.join("\n") + "\n");
+  await runShell(tmp, ["git", "add", "multi.txt"]);
+  st = await core.applyHunk(tmp, { scope: "staged", file: "multi.txt", hunkIndex: 0 });
+  check("取消暂存后该块出现在 unstaged", st.unstaged.some((e) => e.path === "multi.txt"));
+  check("另一块仍在 staged", st.staged.some((e) => e.path === "multi.txt"));
+  const after2 = (await readFile(join(tmp, "multi.txt"), "utf8")).replace(/\r\n/g, "\n").split("\n");
+  check("worktree 内容未被动（line18 仍改动）", after2[17] === "line18-changed");
+  check("worktree 内容未被动（line2 仍改动）", after2[1] === "line2-changed");
+});
+
+live("cherryPick: 干净拣选 + 冲突后 abort / continue 全链路", async (tmp) => {
+  // main 上已有 initial commit。造 side 分支提交一个独立文件，回 main 拣选。
+  await runShell(tmp, ["git", "switch", "-c", "side"]);
+  await writeFile(join(tmp, "side.txt"), "from side\n");
+  await runShell(tmp, ["git", "add", "side.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "side commit"]);
+  const sideSha = (await runShell(tmp, ["git", "rev-parse", "HEAD"])).stdout.trim();
+  await runShell(tmp, ["git", "switch", "main"]);
+  await writeFile(join(tmp, "main.txt"), "from main\n");
+  await runShell(tmp, ["git", "add", "main.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "main commit"]);
+
+  // 1) 干净 cherry-pick
+  const r1 = await core.cherryPickCommit(tmp, sideSha);
+  check("干净拣选 picked=true", r1.picked === true);
+  check("side.txt 落到 main", existsSync(join(tmp, "side.txt")));
+  const log1 = await core.getLog(tmp, { maxCount: 10 });
+  check("历史出现 side commit 副本", log1.commits.some((c) => c.subject === "side commit"));
+
+  // 2) 冲突拣选：c.txt 在两条分支各改同一行 → picked=false + CHERRY_PICK_HEAD 在场
+  await writeFile(join(tmp, "c.txt"), "base\n");
+  await runShell(tmp, ["git", "add", "c.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "add c"]);
+  await runShell(tmp, ["git", "switch", "-c", "conflict-side"]);
+  await writeFile(join(tmp, "c.txt"), "side\n");
+  await runShell(tmp, ["git", "commit", "-am", "side edits c"]);
+  const confSha = (await runShell(tmp, ["git", "rev-parse", "HEAD"])).stdout.trim();
+  await runShell(tmp, ["git", "switch", "main"]);
+  await writeFile(join(tmp, "c.txt"), "main\n");
+  await runShell(tmp, ["git", "commit", "-am", "main edits c"]);
+
+  const r2 = await core.cherryPickCommit(tmp, confSha);
+  check("冲突拣选 picked=false", r2.picked === false);
+  check("c.txt 在冲突清单", r2.status.conflicted.some((e) => e.path === "c.txt"));
+  const gitDirAbs = resolve(tmp, ".git");
+  check("CHERRY_PICK_HEAD 在场", existsSync(join(gitDirAbs, "CHERRY_PICK_HEAD")));
+
+  // 2a) abort：回到拣选前（c.txt 恢复 main 版本，状态文件清除）
+  await core.abortMerge(tmp);
+  check("abort 后 CHERRY_PICK_HEAD 清除", !existsSync(join(gitDirAbs, "CHERRY_PICK_HEAD")));
+  const afterAbort = (await readFile(join(tmp, "c.txt"), "utf8")).replace(/\r\n/g, "\n");
+  check("abort 后 c.txt 恢复 main 版本", afterAbort === "main\n");
+
+  // 2b) 再次拣选 → 手动解决 → continueMerge 完成 pick（守门必须认 CHERRY_PICK_HEAD）
+  const r3 = await core.cherryPickCommit(tmp, confSha);
+  check("再次拣选仍冲突", r3.picked === false);
+  await writeFile(join(tmp, "c.txt"), "resolved\n");
+  await runShell(tmp, ["git", "add", "c.txt"]);
+  const r4 = await core.continueMerge(tmp);
+  check("continue 后冲突清空", r4.conflicted.length === 0);
+  check("continue 后 CHERRY_PICK_HEAD 清除", !existsSync(join(gitDirAbs, "CHERRY_PICK_HEAD")));
+  const log2 = await core.getLog(tmp, { maxCount: 10 });
+  check("pick 以原始提交信息落账", log2.commits[0].subject === "side edits c");
+  const finalC = (await readFile(join(tmp, "c.txt"), "utf8")).replace(/\r\n/g, "\n");
+  check("解决内容保留", finalC === "resolved\n");
+});
+
+// ============================================================================
 // static check：index.js 与 typert.host.js 的 Remote 方法名集合一致
 // ============================================================================
 
@@ -1066,7 +1200,7 @@ test("static: index.js 与 typert.host.js 方法名集合一致", () => {
   eq("集合相等", a, b);
 });
 
-test("static: 27 个 Remote 方法在两边都存在", () => {
+test("static: 29 个 Remote 方法在两边都存在", () => {
   const indexSrc = readFileSync(join(__projectRoot, "index.js"), "utf8");
   const typertSrc = readFileSync(join(__projectRoot, "typert.host.js"), "utf8");
   const expected = [
@@ -1074,7 +1208,7 @@ test("static: 27 个 Remote 方法在两边都存在", () => {
     "conflictContent","stage","unstage","discard","commit","branchCreate",
     "checkout","branchDelete","branchRename","merge","mergeAbort","mergeContinue",
     "resolveConflict","fetch","pull","push","worktreeAdd","worktreeRemove",
-    "worktreePrune","init",
+    "worktreePrune","init","hunkApply","cherryPick",
   ];
   for (const m of expected) {
     check("index 含 " + m, indexSrc.includes('markRemoteMethod(this, "' + m + '"'));
@@ -1207,6 +1341,22 @@ live("wire: 全部查询/变更真实返回值过 strict schema + JSON-safe", as
   wireCheck("diff", await core.getDiff(tmp, { scope: "compare", base: "HEAD~1", target: "HEAD" }));
   const logAfter = await core.getLog(tmp, { maxCount: 50 });
   wireCheck("log", Object.assign({}, logAfter, { graph: computeGraph(logAfter.commits) }));
+
+  // hunkApply：撤销 README 的 unstaged 改动；envelope value 形状 { status }
+  const hunkStatus = await core.applyHunk(tmp, { scope: "worktree", file: "README.md", hunkIndex: 0 });
+  wireCheck("hunkApply", { status: hunkStatus });
+
+  // cherryPick 成功路径（envelope value = { picked, status }）：
+  // 从 HEAD 拉 side 分支提交一个文件，回 main 拣选回来
+  await runShell(tmp, ["git", "switch", "-c", "wire-side"]);
+  await writeFile(join(tmp, "wire-side.txt"), "side\n");
+  await runShell(tmp, ["git", "add", "wire-side.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "wire side"]);
+  const wireSideSha = (await runShell(tmp, ["git", "rev-parse", "HEAD"])).stdout.trim();
+  await runShell(tmp, ["git", "switch", "main"]);
+  const pickRes = await core.cherryPickCommit(tmp, wireSideSha);
+  check("wire: cherryPick picked=true", pickRes.picked === true);
+  wireCheck("cherryPick", pickRes);
 });
 
 // ============================================================================

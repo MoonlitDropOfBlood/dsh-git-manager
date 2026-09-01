@@ -7,8 +7,9 @@
  * methods to the browser Client half under the `gitManager` Remote namespace.
  *
  * Responsibilities:
- *   - 27 Remote methods (§5 of plan): probe / overview / status / diff / log /
- *     branches / worktrees / conflictContent + all mutations.
+ *   - 29 Remote methods (§5 of plan): probe / overview / status / diff / log /
+ *     branches / worktrees / conflictContent + all mutations (含 hunkApply 逐块操作、
+ *     cherryPick 单提交拣选).
  *   - Path validation (fs.stat) + envelope wrapping (`{ok, value}` / `{ok, error}`).
  *   - GitError → user-friendly error code mapping (not-a-repo / dubious-ownership
  *     / auth-failed / timeout / too-large / git-missing / git-failed).
@@ -41,6 +42,7 @@ import {
   stageFiles,
   unstageFiles,
   discardFiles,
+  applyHunk,
   commitStaged,
   createBranch,
   switchBranch,
@@ -49,6 +51,7 @@ import {
   mergeBranch,
   abortMerge,
   continueMerge,
+  cherryPickCommit,
   resolveConflictFile,
   fetchRemote,
   pullBranch,
@@ -149,6 +152,7 @@ export class GitManagerService extends TypertRemoteService {
     markRemoteMethod(this, "stage", "stage");
     markRemoteMethod(this, "unstage", "unstage");
     markRemoteMethod(this, "discard", "discard");
+    markRemoteMethod(this, "hunkApply", "hunkApply");
     markRemoteMethod(this, "commit", "commit");
     markRemoteMethod(this, "branchCreate", "branchCreate");
     markRemoteMethod(this, "checkout", "checkout");
@@ -157,6 +161,7 @@ export class GitManagerService extends TypertRemoteService {
     markRemoteMethod(this, "merge", "merge");
     markRemoteMethod(this, "mergeAbort", "mergeAbort");
     markRemoteMethod(this, "mergeContinue", "mergeContinue");
+    markRemoteMethod(this, "cherryPick", "cherryPick");
     markRemoteMethod(this, "resolveConflict", "resolveConflict");
     markRemoteMethod(this, "fetch", "fetch");
     markRemoteMethod(this, "pull", "pull");
@@ -248,6 +253,13 @@ export class GitManagerService extends TypertRemoteService {
     catch (e) { return { ok: false, error: mapGitError(e) }; }
   }
 
+  // IDEA 式逐块操作：scope=worktree 撤销此块（恢复成 index 版本）；
+  // scope=staged 取消暂存此块（改动移回工作区，不丢内容）。
+  async hunkApply(request) {
+    try { validatePath(request.path); return { ok: true, value: { status: await applyHunk(request.path, request) } }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
   async commit(request) {
     try { validatePath(request.path); return { ok: true, value: await commitStaged(request.path, request.message, !!request.amend) }; }
     catch (e) { return { ok: false, error: mapGitError(e) }; }
@@ -285,6 +297,13 @@ export class GitManagerService extends TypertRemoteService {
 
   async mergeContinue(request) {
     try { validatePath(request.path); return { ok: true, value: { status: await continueMerge(request.path) } }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // cherry-pick 单个提交到当前分支。冲突不抛错：返回 picked:false + status
+  //（仓库进入 CHERRY_PICK_HEAD 态，走冲突页解决后 mergeContinue 完成 pick）。
+  async cherryPick(request) {
+    try { validatePath(request.path); return { ok: true, value: await cherryPickCommit(request.path, request.sha) }; }
     catch (e) { return { ok: false, error: mapGitError(e) }; }
   }
 

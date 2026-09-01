@@ -93,13 +93,26 @@ window.__ModuleLoader__.load({
 .gm-diff-file:last-child{border-bottom:none}
 .gm-diff-fileh{font-family:var(--dsw-font-sans,inherit);font-size:12px;font-weight:500;color:var(--dsw-alias-label-primary);padding:4px 0;cursor:pointer;display:flex;align-items:center;gap:8px}
 .gm-diff-fileh:hover{color:var(--dsw-alias-brand-primary)}
-.gm-diff-hunk{color:var(--dsw-alias-label-tertiary);font-size:11px;padding:2px 0}
-.gm-diff-line{white-space:pre;padding:0 6px}
+.gm-diff-hunk{color:var(--dsw-alias-label-tertiary);font-size:11px;padding:2px 0;display:flex;align-items:center;gap:8px}
+.gm-diff-hunk>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gm-diff-line{white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere;padding:0 6px}
 .gm-diff-add{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 15%,transparent);color:var(--dsw-alias-state-success-primary)}
 .gm-diff-del{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 15%,transparent);color:var(--dsw-alias-state-error-primary)}
 .gm-diff-ctx{color:var(--dsw-alias-label-secondary)}
 .gm-diff-meta{color:var(--dsw-alias-label-tertiary)}
 .gm-diff-trunc{padding:8px 0;font-family:var(--dsw-font-sans,inherit);font-size:12px;color:var(--dsw-alias-label-tertiary);font-style:italic}
+
+/* Diff 独立窗口（盖在面板 z-index:1000 之上、确认框 z-index:1100 之下） */
+.gm-diffwin{position:fixed;inset:0;z-index:1050;display:flex;align-items:center;justify-content:center}
+.gm-diffwin-panel{position:relative;z-index:1;width:min(1080px,calc(100vw - 64px));height:min(780px,100vh - 96px);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border-radius:16px;box-shadow:var(--dsw-shadow-lv3);overflow:hidden}
+.gm-diffwin-body{flex:1;min-height:0;overflow:auto;padding:12px 16px}
+.gm-diffwin-body .gm-diff{margin-top:0;max-height:none}
+
+/* hunk 级操作按钮（IDEA 式逐块撤销/取消暂存） */
+.gm-hunk-btn{flex:none;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
+.gm-hunk-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.gm-hunk-btn-danger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent)}
+.gm-hunk-btn-danger:hover{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary)}
 
 /* Commit box */
 .gm-commit{margin-top:14px;display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
@@ -125,12 +138,12 @@ window.__ModuleLoader__.load({
         codec: { mode: "strict", typeSymbol: "dsh-git-manager#GitManager" + m + "Request", schema: passthrough() } }],
       result: { mode: "strict", typeSymbol: "dsh-git-manager#GitManager" + m + "Result", schema: passthrough() },
     });
-    // 27 个 Remote 方法（与 index.js + typert.host.js 一致；Task 12 自测已校验）
+    // 29 个 Remote 方法（与 index.js + typert.host.js 一致；self-test 静态守卫校验）
     const CLIENT_METHODS = [
       "probe","overview","status","diff","log","branches","remotes","worktrees",
-      "conflictContent","stage","unstage","discard","commit","branchCreate",
+      "conflictContent","stage","unstage","discard","hunkApply","commit","branchCreate",
       "checkout","branchDelete","branchRename","merge","mergeAbort","mergeContinue",
-      "resolveConflict","fetch","pull","push","worktreeAdd","worktreeRemove",
+      "cherryPick","resolveConflict","fetch","pull","push","worktreeAdd","worktreeRemove",
       "worktreePrune","init",
     ];
     const CLIENT_REMOTE = {
@@ -150,6 +163,8 @@ window.__ModuleLoader__.load({
 
     // ---- 模块级状态（面板开关、目标路径） ----
     let openState = { open: false, targetPath: undefined };
+    // DiffWindow 等顶层弹层的打开计数：>0 时面板的 Esc 不关面板（先关弹层）。
+    let modalDepth = 0;
     const listeners = new Set();
     function setOpen(open, targetPath) {
       openState = { open: !!open, targetPath: targetPath === undefined ? (openState.targetPath || null) : targetPath };
@@ -502,6 +517,9 @@ window.__ModuleLoader__.load({
           React.createElement("div", { className: "gm-diff-meta" }, "(空差异)"),
         );
       }
+      // onHunk 提供时每个代码块显示操作按钮（IDEA 式逐块操作）；
+      // hunk 索引 = 该文件段内的序号（diff 窗口始终是单文件 diff）。
+      const onHunk = typeof props.onHunk === "function" ? props.onHunk : null;
       return React.createElement("div", { className: "gm-diff" },
         props.truncated ? React.createElement("div", { className: "gm-diff-trunc" }, "差异过大，已截断。请指定单文件以查看完整内容。") : null,
         files.map((f, i) => {
@@ -513,7 +531,14 @@ window.__ModuleLoader__.load({
               React.createElement("span", { className: "gm-file-kind gm-file-kind-deleted" }, "-" + f.delCount),
             ),
             f.hunks.map((h, j) => React.createElement("div", { key: j },
-              React.createElement("div", { className: "gm-diff-hunk" }, h.header),
+              React.createElement("div", { className: "gm-diff-hunk" },
+                React.createElement("span", null, h.header),
+                onHunk ? React.createElement("button", {
+                  className: "gm-hunk-btn" + (props.hunkDanger ? " gm-hunk-btn-danger" : ""),
+                  title: props.hunkTitle || undefined,
+                  onClick: () => onHunk(j),
+                }, props.hunkLabel || "撤销此块") : null,
+              ),
               h.lines.map((ln, k) => React.createElement("div", {
                 key: k,
                 className: "gm-diff-line gm-diff-" + ln.kind,
@@ -525,40 +550,100 @@ window.__ModuleLoader__.load({
     }
 
     // ============================================================================
+    // DiffWindow：diff 独立窗口（Portal 落 body，z-index 1050 盖在面板之上；
+    // Esc/mask 点击只关窗口不关面板——靠模块级 modalDepth 与面板 Esc 协调）
+    // ============================================================================
+    function DiffWindow(props) {
+      // { title, sub, loading, text, truncated, onClose, onRefresh,
+      //   onHunk, hunkLabel, hunkDanger, hunkTitle }
+      React.useEffect(() => {
+        modalDepth++;
+        const onKey = (e) => { if (e.key === "Escape") props.onClose(); };
+        document.addEventListener("keydown", onKey);
+        return () => { modalDepth--; document.removeEventListener("keydown", onKey); };
+      }, []);
+      return ReactDOM.createPortal(
+        React.createElement("div", { className: "gm-diffwin", role: "dialog", "aria-modal": "true" },
+          React.createElement("div", { className: "gm-mask", onClick: props.onClose }),
+          React.createElement("div", { className: "gm-diffwin-panel" },
+            React.createElement("div", { className: "gm-head" },
+              React.createElement("span", { className: "gm-head-title" }, props.title || "差异"),
+              props.sub ? React.createElement("span", { className: "gm-head-path", title: props.sub }, props.sub) : null,
+              React.createElement("span", { className: "gm-head-spacer" }),
+              props.actions || null,
+              props.onRefresh ? React.createElement("button", { className: "gm-btn", onClick: props.onRefresh, disabled: !!props.loading }, "刷新") : null,
+              React.createElement("button", { className: "gm-btn gm-btn-icon", onClick: props.onClose, title: "关闭（Esc）", "aria-label": "关闭 diff 窗口" },
+                React.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", "aria-hidden": true },
+                  React.createElement("path", { d: "M18 6 6 18" }),
+                  React.createElement("path", { d: "m6 6 12 12" }),
+                ),
+              ),
+            ),
+            React.createElement("div", { className: "gm-diffwin-body" },
+              props.loading
+                ? React.createElement("div", { className: "gm-empty" },
+                    React.createElement("span", { className: "gm-spinner" }),
+                    " 加载差异…",
+                  )
+                : React.createElement(DiffView, {
+                    text: props.text || "",
+                    truncated: !!props.truncated,
+                    onHunk: props.onHunk,
+                    hunkLabel: props.hunkLabel,
+                    hunkDanger: props.hunkDanger,
+                    hunkTitle: props.hunkTitle,
+                  }),
+            ),
+          ),
+        ),
+        document.body,
+      );
+    }
+
+    // ============================================================================
     // ChangesTab
     // ============================================================================
+    const SCOPE_LABEL = {
+      worktree: "未暂存（工作区 vs 暂存区）",
+      staged: "已暂存（暂存区 vs HEAD）",
+      untracked: "未跟踪（完整内容）",
+    };
+
     function ChangesTab(props) {
       const remote = props.remote;
       const repoPath = props.repoPath;
       const status = props.status;
       const act = props.act;
       const setError = props.setError;
-      const [diffText, setDiffText] = React.useState(null);
-      const [diffTruncated, setDiffTruncated] = React.useState(false);
-      const [diffScope, setDiffScope] = React.useState("worktree");
-      const [activeFile, setActiveFile] = React.useState(null);
+      const [diffWin, setDiffWin] = React.useState(null); // { file, scope, loading, text, truncated }
       const [busy, setBusyLocal] = React.useState(null);
       const [confirming, setConfirming] = React.useState(null);
+      const [hunkConfirm, setHunkConfirm] = React.useState(null); // { hunkIndex }
       const [commitMsg, setCommitMsg] = React.useState("");
       const [amend, setAmend] = React.useState(false);
       const [stageAll, setStageAll] = React.useState(false);
 
-      const refresh = async () => {
-        const r = await unwrap(await remote.status({ path: repoPath }));
-        if (r.ok && props.onStatus) props.onStatus(r.value);
+      // 点击文件 → 独立 diff 窗口（不再挤在列表旁边/下面）
+      const openDiff = async (file, scope) => {
+        setDiffWin({ file, scope, loading: true, text: "", truncated: false });
+        const r = await unwrap(await remote.diff({ path: repoPath, scope, file }));
+        if (!r.ok) { setDiffWin(null); setError(r.error.message || r.error.code); return; }
+        setDiffWin({ file, scope, loading: false, text: r.value.text, truncated: r.value.truncated });
       };
 
-      const loadDiff = async (file, scope) => {
-        const s = scope || diffScope;
-        if (!file) {
-          setDiffText(""); setDiffTruncated(false); setActiveFile(null); return;
-        }
-        const r = await unwrap(await remote.diff({ path: repoPath, scope: s, file }));
-        if (r.ok) {
-          setDiffText(r.value.text); setDiffTruncated(r.value.truncated); setActiveFile(file); setDiffScope(s);
-        } else {
-          setError(r.error.message || r.error.code);
-        }
+      // 逐块操作（IDEA 式）：worktree=撤销此块；staged=取消暂存此块。二次确认后执行。
+      const onHunk = (hunkIndex) => setHunkConfirm({ hunkIndex });
+      const onConfirmHunk = async () => {
+        const c = hunkConfirm;
+        setHunkConfirm(null);
+        if (!c || !diffWin) return;
+        const r = await act("hunkApply", () => remote.hunkApply({ path: repoPath, scope: diffWin.scope, file: diffWin.file, hunkIndex: c.hunkIndex }));
+        if (r === undefined) return; // act 已把错误放进错误条
+        // 成功后刷新窗口内 diff；该文件在此 scope 已无差异则关窗
+        const d = await unwrap(await remote.diff({ path: repoPath, scope: diffWin.scope, file: diffWin.file }));
+        if (!d.ok) return;
+        const empty = !d.value.text;
+        setDiffWin((cur) => (cur ? (empty ? null : { ...cur, loading: false, text: d.value.text, truncated: d.value.truncated }) : cur));
       };
 
       const renderGroup = (label, entries, kind, scope) => {
@@ -573,11 +658,12 @@ window.__ModuleLoader__.load({
           entries.map((e) => {
             const entry = typeof e === "string" ? { path: e } : e;
             const kindClass = (entry.kind && ("gm-file-kind-" + entry.kind)) || "";
-            const isActive = activeFile === entry.path && diffScope === scope;
+            const isActive = !!(diffWin && diffWin.file === entry.path && diffWin.scope === scope);
             return React.createElement("div", {
               key: entry.path,
               className: "gm-file" + (isActive ? " gm-file-active" : ""),
-              onClick: () => loadDiff(entry.path, scope),
+              title: "点击查看差异",
+              onClick: () => openDiff(entry.path, scope),
             },
               React.createElement("span", { className: "gm-file-kind " + kindClass }, entry.kind || "new"),
               React.createElement("span", { className: "gm-file-path" }, entry.path),
@@ -608,18 +694,17 @@ window.__ModuleLoader__.load({
           await act("stage-all", () => remote.stage({ path: repoPath, files: [], all: true }));
         }
         const r = await act("commit", () => remote.commit({ path: repoPath, message: commitMsg, amend }));
-        if (r) { setCommitMsg(""); setAmend(false); setStageAll(false); setActiveFile(null); setDiffText(null); }
+        if (r) { setCommitMsg(""); setAmend(false); setStageAll(false); setDiffWin(null); }
       };
 
+      const isClean = !status || (status.staged.length + status.unstaged.length + status.untracked.length === 0);
+      const showCommit = (status && status.staged.length > 0) || (status && status.staged.length === 0 && status.unstaged.length > 0 && stageAll);
       return React.createElement(React.Fragment, null,
         renderGroup("Staged", status && status.staged, "staged", "staged"),
         renderGroup("Unstaged", status && status.unstaged, "unstaged", "worktree"),
         renderGroup("Untracked", status && status.untracked, "untracked", "untracked"),
-        !status || (status.staged.length + status.unstaged.length + status.untracked.length === 0)
-          ? React.createElement("div", { className: "gm-empty" }, "工作区干净。")
-          : null,
-        React.createElement(DiffView, { text: diffText || "", truncated: !!diffTruncated }),
-        status && status.staged.length > 0 || (status && status.staged.length === 0 && status.unstaged.length > 0 && stageAll)
+        isClean ? React.createElement("div", { className: "gm-empty" }, "工作区干净。") : null,
+        showCommit
           ? React.createElement("div", { className: "gm-commit" },
               React.createElement("textarea", { className: "gm-textarea", placeholder: "提交信息…", value: commitMsg, onChange: (e) => setCommitMsg(e.target.value) }),
               React.createElement("div", { style: { display: "flex", gap: 12, alignItems: "center" } },
@@ -636,6 +721,21 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
+        diffWin ? React.createElement(DiffWindow, {
+          title: diffWin.file,
+          sub: SCOPE_LABEL[diffWin.scope] || diffWin.scope,
+          loading: diffWin.loading,
+          text: diffWin.text,
+          truncated: diffWin.truncated,
+          onClose: () => setDiffWin(null),
+          onRefresh: () => openDiff(diffWin.file, diffWin.scope),
+          onHunk: (diffWin.scope === "worktree" || diffWin.scope === "staged") ? onHunk : null,
+          hunkLabel: diffWin.scope === "staged" ? "取消暂存此块" : "撤销此块",
+          hunkDanger: diffWin.scope === "worktree",
+          hunkTitle: diffWin.scope === "staged"
+            ? "把该代码块移出暂存区（改动保留在工作区）"
+            : "丢弃该代码块在工作区的改动（恢复为暂存区版本）",
+        }) : null,
         React.createElement(ConfirmDialog, {
           open: !!confirming,
           title: "放弃变更？",
@@ -644,6 +744,17 @@ window.__ModuleLoader__.load({
           confirmLabel: "确认丢弃",
           onCancel: () => setConfirming(null),
           onConfirm: onConfirmDiscard,
+        }),
+        React.createElement(ConfirmDialog, {
+          open: !!hunkConfirm,
+          title: diffWin && diffWin.scope === "staged" ? "取消暂存此代码块？" : "撤销此代码块？",
+          message: diffWin && diffWin.scope === "staged"
+            ? "该代码块将移出暂存区并保留在工作区，内容不会丢失。\n\n" + (diffWin ? diffWin.file : "")
+            : "将丢弃该代码块在工作区中的改动（恢复为暂存区版本），此操作无法撤销。\n\n" + (diffWin ? diffWin.file : ""),
+          danger: !(diffWin && diffWin.scope === "staged"),
+          confirmLabel: diffWin && diffWin.scope === "staged" ? "取消暂存" : "撤销此块",
+          onCancel: () => setHunkConfirm(null),
+          onConfirm: onConfirmHunk,
         }),
       );
     }
@@ -762,8 +873,9 @@ window.__ModuleLoader__.load({
       const [log, setLog] = React.useState(null); // { commits, graph, hasMore }
       const [allRefs, setAllRefs] = React.useState(true);
       const [maxCount, setMaxCount] = React.useState(200);
-      const [selected, setSelected] = React.useState(null); // sha for detail
-      const [commitDiff, setCommitDiff] = React.useState(null);
+      const [diffWin, setDiffWin] = React.useState(null); // { sha, subject, loading, text, truncated }
+      const [hoverRow, setHoverRow] = React.useState(null); // 悬停行 → 分支线聚焦高亮
+      const [picking, setPicking] = React.useState(false); // cherry-pick 进行中（禁用按钮防重复点击）
 
       const refresh = async () => {
         const r = await unwrap(await remote.log({ path: repoPath, maxCount, all: allRefs }));
@@ -773,20 +885,99 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => { refresh(); }, [repoPath, maxCount, allRefs]);
 
-      const loadCommitDiff = async (sha) => {
-        setSelected(sha);
-        const r = await unwrap(await remote.diff({ path: repoPath, scope: "commit", sha }));
-        if (r.ok) setCommitDiff(r.value);
-        else setError(r.error.message || r.error.code);
+      // 点击提交 → 独立 diff 窗口（历史提交是只读 diff，不出逐块操作按钮）
+      const openCommitDiff = async (c) => {
+        setDiffWin({ sha: c.sha, subject: c.subject, loading: true, text: "", truncated: false });
+        const r = await unwrap(await remote.diff({ path: repoPath, scope: "commit", sha: c.sha }));
+        if (!r.ok) { setDiffWin(null); setError(r.error.message || r.error.code); return; }
+        setDiffWin({ sha: c.sha, subject: c.subject, loading: false, text: r.value.text, truncated: r.value.truncated });
+      };
+
+      // cherry-pick：把窗口里查看的提交拣选到当前分支。非破坏操作（新增提交），无需二次确认。
+      // 冲突时后端返回 picked:false（不抛错）→ 关窗跳冲突页，「继续」即完成 pick。
+      const doCherryPick = async (sha) => {
+        setPicking(true);
+        try {
+          const r = unwrap(await remote.cherryPick({ path: repoPath, sha }));
+          if (!r.ok) { setError(r.error.message || r.error.code); return; }
+          if (props.onStatus) props.onStatus(r.value.status);
+          setDiffWin(null);
+          refresh();
+          if (r.value.picked === false) {
+            if (props.onSwitchTab) props.onSwitchTab("conflicts");
+            setError("Cherry-pick 遇到冲突：请在「冲突」页解决后点「继续」完成（或「中止操作」回退）。");
+          }
+        } finally {
+          setPicking(false);
+        }
       };
 
       if (!log) return React.createElement("div", { className: "gm-empty" }, "加载历史…");
 
       const { commits, graph, hasMore } = log;
-      const ROW_H = 32, COL_W = 14, PAD = 16;
+      const ROW_H = 32, PAD = 16;
       const PALETTE = ["#5b8cff","#2fb37d","#d99a1f","#9b7ff0","#e5484d","#18a0fb","#f76b15","#12a594","#e93d82","#8e4ec6","#6d7c8f","#a18072"];
-      const width = Math.max(80, (graph.laneCount || 1) * COL_W + PAD);
+      // 分支（车道）多时自动压缩列宽：图形区宽度封顶 ~170px，
+      // 避免车道全部铺开把提交内容挤变形。
+      const lanes = Math.max(1, graph.laneCount || 1);
+      const COL_W = lanes <= 8 ? 14 : Math.max(5, Math.round(150 / lanes));
+      const NODE_R = COL_W >= 10 ? 4 : 3;
+      const width = Math.max(56, lanes * COL_W + PAD);
       const totalH = commits.length * ROW_H;
+
+      const X = (col) => PAD / 2 + col * COL_W;
+      const Y = (row) => row * ROW_H + ROW_H / 2;
+      // 长边省略阈值（行）：跨度超过它的边改为"两端实线 stub + 中段细虚线"，
+      // 压住长斜线/长竖线的视觉噪音，但保留走向线索。
+      const SPAN_ELIDE = 24;
+
+      // 悬停聚焦：边与悬停提交直接相连，或同车道竖线从上方跨到下方，算"相关"
+      const hoverCol = hoverRow !== null && graph.nodes[hoverRow] ? graph.nodes[hoverRow].col : null;
+      const isHot = (l) => {
+        if (hoverRow === null) return false;
+        if (l.fromRow === hoverRow || l.toRow === hoverRow) return true;
+        return hoverCol !== null && l.fromCol === hoverCol && l.fromRow < hoverRow && (l.toRow === null || l.toRow > hoverRow);
+      };
+      // 悬停时相关边排到最后画（压在最上层）；sort 稳定，其余保持原始顺序
+      const orderedLinks = hoverRow === null ? graph.links
+        : graph.links.slice().sort((a, b) => (isHot(a) ? 1 : 0) - (isHot(b) ? 1 : 0));
+
+      const renderLink = (l, i) => {
+        const x1 = X(l.fromCol), x2 = X(l.toCol);
+        const y1 = Y(l.fromRow);
+        const y2 = (l.toRow === null ? totalH : Y(l.toRow));
+        const color = PALETTE[l.color % PALETTE.length];
+        const span = l.toRow === null ? Infinity : l.toRow - l.fromRow;
+        const elided = span > SPAN_ELIDE;
+        const hot = isHot(l);
+        // 视觉分层：parent 竖线当背景骨架（淡），merge 斜线是信息（细但实）
+        const baseOp = l.kind === "parent" ? 0.45 : l.kind === "collapse" ? 0.55 : 0.7;
+        const opacity = hoverRow === null ? baseOp : (hot ? 0.95 : baseOp * 0.25);
+        const sw = (l.kind === "merge" ? 1.25 : 1.5) + (hot ? 0.5 : 0);
+        const key = "l" + i;
+
+        if (elided) {
+          const stub = ROW_H * 1.2;
+          const midEnd = l.toRow === null ? totalH - 8 : y2 - stub;
+          const parts = [
+            React.createElement("path", { key: key + "-a", d: "M " + x1 + " " + y1 + " L " + x1 + " " + (y1 + stub), stroke: color, strokeWidth: sw, fill: "none", opacity }),
+            React.createElement("path", { key: key + "-m", d: "M " + x1 + " " + (y1 + stub) + " L " + x2 + " " + midEnd, stroke: color, strokeWidth: 1, fill: "none", opacity: opacity * 0.35, strokeDasharray: "2 4" }),
+          ];
+          if (l.toRow === null) {
+            // 父提交在窗口外：底边小倒三角，明示"延伸出去"
+            parts.push(React.createElement("path", { key: key + "-z", d: "M " + (x2 - 3.5) + " " + (totalH - 8) + " L " + (x2 + 3.5) + " " + (totalH - 8) + " L " + x2 + " " + (totalH - 2.5) + " Z", fill: color, stroke: "none", opacity }));
+          } else {
+            parts.push(React.createElement("path", { key: key + "-b", d: "M " + x2 + " " + midEnd + " L " + x2 + " " + y2, stroke: color, strokeWidth: sw, fill: "none", opacity }));
+          }
+          return parts;
+        }
+        if (l.kind === "collapse" || l.fromCol === l.toCol) {
+          // 同列竖线 / collapse 短横
+          return React.createElement("path", { key, d: "M " + x1 + " " + y1 + " L " + x2 + " " + y2, stroke: color, strokeWidth: sw, fill: "none", opacity });
+        }
+        // 跨列用 cubic bezier
+        return React.createElement("path", { key, d: "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + ROW_H) + ", " + x2 + " " + (y2 - ROW_H) + ", " + x2 + " " + y2, stroke: color, strokeWidth: sw, fill: "none", opacity });
+      };
 
       return React.createElement(React.Fragment, null,
         React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "center", marginBottom: 10 } },
@@ -803,70 +994,48 @@ window.__ModuleLoader__.load({
             style: { position: "absolute", left: 0, top: 0, pointerEvents: "none" },
             "aria-hidden": true,
           },
-            graph.links.map((l, i) => {
-              const x1 = PAD / 2 + l.fromCol * COL_W;
-              const x2 = PAD / 2 + l.toCol * COL_W;
-              const y1 = l.fromRow * ROW_H + ROW_H / 2;
-              const y2 = (l.toRow === null ? totalH : l.toRow * ROW_H + ROW_H / 2);
-              const color = PALETTE[l.color % PALETTE.length];
-              if (l.kind === "collapse" || (l.fromCol === l.toCol && (l.toRow === l.fromRow + 1 || l.toRow === null))) {
-                // 简单竖线（无需 c-curve）
-                return React.createElement("path", {
-                  key: i,
-                  d: "M " + x1 + " " + y1 + " L " + x2 + " " + y2,
-                  stroke: color,
-                  strokeWidth: 1.5,
-                  fill: "none",
-                  opacity: 0.7,
-                });
-              }
-              if (l.fromCol === l.toCol) {
-                return React.createElement("path", {
-                  key: i,
-                  d: "M " + x1 + " " + y1 + " L " + x2 + " " + y2,
-                  stroke: color,
-                  strokeWidth: 1.5,
-                  fill: "none",
-                  opacity: 0.7,
-                });
-              }
-              // 跨列用 cubic bezier
-              const midY = (y1 + y2) / 2;
-              return React.createElement("path", {
-                key: i,
-                d: "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + ROW_H) + ", " + x2 + " " + (y2 - ROW_H) + ", " + x2 + " " + y2,
-                stroke: color,
-                strokeWidth: 1.5,
-                fill: "none",
-                opacity: 0.7,
-              });
-            }),
+            orderedLinks.map(renderLink),
             graph.nodes.map((n, i) => React.createElement("circle", {
               key: "n" + i,
-              cx: PAD / 2 + n.col * COL_W,
-              cy: i * ROW_H + ROW_H / 2,
-              r: 4,
+              cx: X(n.col),
+              cy: Y(i),
+              r: NODE_R + (hoverRow === i ? 0.75 : 0),
               fill: PALETTE[n.color % PALETTE.length],
+              opacity: hoverRow === null || hoverRow === i ? 1 : 0.35,
             })),
           ),
           commits.map((c, i) => React.createElement("div", {
             key: c.sha,
-            className: "gm-file" + (selected === c.sha ? " gm-file-active" : ""),
+            className: "gm-file" + (diffWin && diffWin.sha === c.sha ? " gm-file-active" : ""),
             style: { paddingLeft: width + 8, height: ROW_H, lineHeight: ROW_H + "px", boxSizing: "border-box" },
-            onClick: () => loadCommitDiff(c.sha),
+            title: "点击查看该提交的差异",
+            onClick: () => openCommitDiff(c),
+            onMouseEnter: () => setHoverRow(i),
+            onMouseLeave: () => setHoverRow(null),
           },
-            React.createElement("span", { style: { fontFamily: "ui-monospace,monospace", fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginRight: 8 } }, c.short),
-            c.refs ? React.createElement("span", { style: { fontSize: 10, padding: "0 6px", borderRadius: 999, background: "color-mix(in srgb,var(--dsw-alias-brand-primary) 15%,transparent)", color: "var(--dsw-alias-brand-primary)", marginRight: 8 } }, c.refs) : null,
-            React.createElement("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.subject),
-            React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8 } }, c.author),
-            React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8 } }, fmtTime(c.at)),
+            React.createElement("span", { style: { flex: "none", fontFamily: "ui-monospace,monospace", fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginRight: 8 } }, c.short),
+            c.refs ? React.createElement("span", { style: { flex: "none", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, padding: "0 6px", borderRadius: 999, background: "color-mix(in srgb,var(--dsw-alias-brand-primary) 15%,transparent)", color: "var(--dsw-alias-brand-primary)", marginRight: 8 } }, c.refs) : null,
+            React.createElement("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.subject),
+            React.createElement("span", { style: { flex: "none", whiteSpace: "nowrap", fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8 } }, c.author),
+            React.createElement("span", { style: { flex: "none", whiteSpace: "nowrap", fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8 } }, fmtTime(c.at)),
           )),
         ),
-        selected && commitDiff ? React.createElement("div", { style: { marginTop: 14 } },
-          React.createElement("div", { style: { fontSize: 13, fontWeight: 500, marginBottom: 6 } }, "Commit " + selected.slice(0, 12)),
-          React.createElement(DiffView, { text: commitDiff.text, truncated: commitDiff.truncated }),
-          React.createElement("button", { className: "gm-btn", style: { marginTop: 8 }, onClick: () => { setSelected(null); setCommitDiff(null); } }, "关闭详情"),
-        ) : null,
+        diffWin ? React.createElement(DiffWindow, {
+          title: "Commit " + diffWin.sha.slice(0, 12),
+          sub: diffWin.subject || "",
+          loading: diffWin.loading,
+          text: diffWin.text,
+          truncated: diffWin.truncated,
+          onClose: () => setDiffWin(null),
+          onRefresh: () => openCommitDiff({ sha: diffWin.sha, subject: diffWin.subject }),
+          onHunk: null,
+          actions: React.createElement("button", {
+            className: "gm-btn",
+            disabled: picking || diffWin.loading,
+            title: "把该提交拣选（cherry-pick）到当前分支",
+            onClick: () => doCherryPick(diffWin.sha),
+          }, picking ? "Cherry-pick…" : "Cherry-pick 到当前分支"),
+        }) : null,
       );
     }
 
@@ -915,8 +1084,8 @@ window.__ModuleLoader__.load({
           ),
         )),
         React.createElement("div", { style: { marginTop: 14, display: "flex", gap: 8 } },
-          React.createElement("button", { className: "gm-btn", onClick: async () => { await act("mergeContinue", () => remote.mergeContinue({ path: repoPath })); } }, "继续合并（git commit --no-edit）"),
-          React.createElement("button", { className: "gm-btn gm-btn-danger", onClick: () => setConfirming({ kind: "abortMerge" }) }, "中止合并"),
+          React.createElement("button", { className: "gm-btn", onClick: async () => { await act("mergeContinue", () => remote.mergeContinue({ path: repoPath })); } }, "继续（提交解决方案，完成 merge/cherry-pick）"),
+          React.createElement("button", { className: "gm-btn gm-btn-danger", onClick: () => setConfirming({ kind: "abortMerge" }) }, "中止操作"),
         ),
         editing ? React.createElement("div", { className: "gm-overlay", onClick: () => setEditing(null) },
           React.createElement("div", { className: "gm-panel", style: { width: "min(900px,94vw)", maxHeight: "90vh", display: "flex", flexDirection: "column" }, onClick: (e) => e.stopPropagation() },
@@ -941,8 +1110,8 @@ window.__ModuleLoader__.load({
         ) : null,
         React.createElement(ConfirmDialog, {
           open: !!confirming,
-          title: "中止合并？",
-          message: "合并会被中止，所有冲突解决作废。",
+          title: "中止当前操作？",
+          message: "进行中的 merge / cherry-pick 会被中止，所有冲突解决作废。",
           danger: true,
           confirmLabel: "中止",
           onCancel: () => setConfirming(null),
@@ -1077,7 +1246,8 @@ window.__ModuleLoader__.load({
           const isOpen = useOpen();
           React.useEffect(() => {
             if (!isOpen) return;
-            const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+            // DiffWindow 等顶层弹层打开时（modalDepth>0），Esc 只关弹层不关面板
+            const onKey = (e) => { if (e.key === "Escape" && modalDepth === 0) setOpen(false); };
             document.addEventListener("keydown", onKey);
             return () => document.removeEventListener("keydown", onKey);
           }, [isOpen]);

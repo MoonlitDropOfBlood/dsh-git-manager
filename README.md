@@ -24,7 +24,7 @@
 | 🪟 设置同规格面板 | 800px 居中弹窗、圆角 24、毛玻璃遮罩；**Esc 与遮罩点击均可关闭**；DOM 经 Portal 落到 body 层（z-index 1000），不被任何侧栏插件遮挡 |
 | 📝 变更 | staged / unstaged / untracked 三组文件，stage / unstage / discard（CJK 文件名完整支持），自绘 unified diff 渲染器，commit（含 amend / 全部暂存并提交） |
 | 🌿 分支 | 本地 / 远程列表（upstream、ahead/behind 角标），新建（带起点）/ 切换 / 改名 / 删除（未合并需二次确认）/ 合并，与当前分支对比 diff |
-| 🕸 历史 | **分支线图形**（`git log --all --date-order` + Host 侧布局计算 + Client 纯 SVG 渲染）+ refs 徽章 + 分页加载；点击提交查看 commit diff |
+| 🕸 历史 | **分支线图形**（`git log --all --date-order` + Host 侧布局计算 + Client 纯 SVG 渲染，长跨度边自动省略淡化、悬停高亮单条分支走向）+ refs 徽章 + 分页加载；点击提交查看 commit diff，窗口内一键 **cherry-pick 到当前分支**（冲突自动跳转冲突页，继续/中止全链路支持） |
 | 🔀 冲突 | 合并进行中横幅（继续 / 中止）+ 每文件三种解决方式：ours / theirs / 手动编辑（base / ours / theirs 三栏对照 + 可编辑区） |
 | 🌳 Worktree | 列表 / 添加（可带新分支；**成功后自动注册为 DSH 工作区**，workspace-write 沙盒下直接可写）/ 删除（脏目录需 force 二次确认）/ prune |
 | 🎨 主题适配 | 颜色全部走 DSH 设计 token（主按钮与输入框发送按钮同色），明暗主题自动跟随 |
