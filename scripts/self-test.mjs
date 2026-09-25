@@ -1266,6 +1266,57 @@ test("static: client.js 入口模型（composer 工具行唯一入口 + 无 FAB/
 });
 
 // ============================================================================
+// 跨版本 strict codec 双形态 + 宿主版本声明（2026-09-24 实测 21 个 typert-loader 版本矩阵）
+//   - ≤0.1.6-alpha.1：loader/registry/gateway 校验并使用 codec.schema（zod .parse）
+//   - ≥0.1.6-alpha.2（含 0.1.7-rc.x）：校验 codec.create() 工厂，网关解码 codec.create().parse()
+// 两代校验各看一个键、互不检查对方——只写一边，另一端 ctx.remote.$mount 注册直接抛
+// "strict codec has no create() factory"，client apply 整个失败、槽位不注册、入口不出现。
+// engines.dsh 双位置同值声明是 dshmarket 宿主要求显示/筛选/安装阻断的数据源。
+// ============================================================================
+
+test("static: strict codec 双形态（schema + create 并存，跨 0.1.5/0.1.7）", () => {
+  check("TYPERT 有 invocation", TYPERT.invocations.length > 0);
+  for (const inv of TYPERT.invocations) {
+    const codecs = [["result", inv.result], ...inv.parameters.map((p, i) => ["param[" + i + "]", p.codec])];
+    for (const [label, codec] of codecs) {
+      const at = inv.id + " " + label;
+      check(at + " mode=strict", codec && codec.mode === "strict");
+      check(at + " 有 schema.parse（≤0.1.6 校验）", codec && typeof codec.schema === "object" && typeof codec.schema.parse === "function");
+      check(at + " 有 create() 工厂（≥0.1.6-alpha.2 校验）", codec && typeof codec.create === "function");
+      if (codec && typeof codec.create === "function") {
+        check(at + " create() 返回可 parse 对象", typeof codec.create().parse === "function");
+      }
+    }
+  }
+  // client.js 的 CLIENT_REMOTE 是 bundle 内联字面量，只能源码级守卫
+  const clientSrc = readFileSync(join(__projectRoot, "client.js"), "utf8");
+  const methodBlock = clientSrc.match(/const method = \(m\) => \(\{[\s\S]*?\}\);/);
+  check("client.js 找到 method() 描述符构造", !!methodBlock);
+  if (methodBlock) {
+    check("client codec 同时有 schema: passthrough()", /schema: passthrough\(\)/.test(methodBlock[0]));
+    check("client codec 同时有 create: passthrough（0.1.7 registry 校验）", /create: passthrough/.test(methodBlock[0]));
+  }
+});
+
+test("static: engines.dsh 宿主版本声明（dshmarket 显示/筛选/阻断数据源）", () => {
+  const pkg = JSON.parse(readFileSync(join(__projectRoot, "package.json"), "utf8"));
+  const top = pkg.engines && pkg.engines.dsh;
+  const nested = pkg.dsh && pkg.dsh.engines && pkg.dsh.engines.dsh;
+  check("顶层 engines.dsh 是非空字符串", typeof top === "string" && top.length > 0);
+  check("dsh.engines.dsh 是非空字符串（dshmarket 两处都读、顶层优先）", typeof nested === "string" && nested.length > 0);
+  check("两位置同值", top === nested);
+  // 与 peer 对齐：dshmarket 显示全部声明的交集，同值才不会显示成 "A ∩ B"
+  const peer = pkg.peerDependencies && pkg.peerDependencies["@deepseek-ai/dsh-typert-protocol"];
+  check("engines 与 dsh-typert-protocol peer 同 range（市场交集显示单条）", typeof peer === "string" && top === peer);
+  // 0.1.7-rc.1 必须落在 range 内（market 以 includePrerelease 求值）
+  if (typeof top === "string") {
+    // 复刻 dshmarket satisfiesRange(v, range, {includePrerelease:true}) 的语义做冒烟：
+    // 当前声明形式 "^x.y.z-rc.n" 展开为 >=x.y.z-rc.n <x.(y+1).0，rc 预发布落在区间内
+    check("range 形如 ^0.1.0-rc.7（0.1.7-rc.1 可满足）", /^\^0\.1\.\d+-rc\.\d+$/.test(top) || /^>=/.test(top));
+  }
+});
+
+// ============================================================================
 // wire-format 合规（live）：真实返回值必须同时过两道网关校验
 //   1. typert result codec 的 strict zod schema
 //   2. dsh-api-gateway 的 assertJsonValue（显式 undefined / schema 外 null /

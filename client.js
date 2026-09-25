@@ -129,14 +129,17 @@ window.__ModuleLoader__.load({
 `;
 
     // ---- Client Remote 自挂载 ----
+    // strict codec 双形态（与 typert.host.js 同因）：0.1.5 客户端 registry 校验
+    // `schema.parse`，0.1.7 校验 `create()` 工厂——只写一边会在另一端
+    // ctx.remote.$mount 注册时抛错，插件整个 apply 失败、入口不出现。
     const passthrough = () => ({ parse: (v) => v });
     const method = (m) => ({
       id: "dsh-git-manager#gitManager/" + m,
       service: "gitManager", namespace: "gitManager", method: m,
       invocation: { kind: "direct" },
       parameters: [{ name: "request", wire: "request", source: "json",
-        codec: { mode: "strict", typeSymbol: "dsh-git-manager#GitManager" + m + "Request", schema: passthrough() } }],
-      result: { mode: "strict", typeSymbol: "dsh-git-manager#GitManager" + m + "Result", schema: passthrough() },
+        codec: { mode: "strict", typeSymbol: "dsh-git-manager#GitManager" + m + "Request", schema: passthrough(), create: passthrough } }],
+      result: { mode: "strict", typeSymbol: "dsh-git-manager#GitManager" + m + "Result", schema: passthrough(), create: passthrough },
     });
     // 29 个 Remote 方法（与 index.js + typert.host.js 一致；self-test 静态守卫校验）
     const CLIENT_METHODS = [

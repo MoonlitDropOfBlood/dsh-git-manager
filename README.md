@@ -66,6 +66,10 @@ dsh plugin --profile web add /path/to/dsh-git-manager
 
 > `dsh plugin add` 把插件装成 profile 的 npm 依赖并追加到 `dsh.profile.bundles`，启动时 DSH 自动应用包内的 `cordis.patch.yml` 挂载插件。卸载：`dsh plugin --profile web remove dsh-git-manager`。
 
+### 兼容性
+
+宿主要求 **DSH `^0.1.0-rc.7`**（`package.json` 顶层 `engines.dsh` + `dsh.engines.dsh` 双位置声明，dshmarket 卡片的「宿主要求」/「适配本机 DSH 版本」筛选即读此值）。Typert strict codec 采用 `schema` + `create()` 双形态，已用 DSH 全部 21 个 typert-loader 版本（0.1.0-rc.6 … 0.1.7-rc.2）逐一校验 manifest 通过——0.1.6-alpha.2 起 DSH 改用 `codec.create().` 工厂，只写 `schema` 会在 0.1.7 上导致 `$mount` 抛 `has no create() factory`、入口按钮不出现。
+
 ## 使用
 
 1. **打开面板**：当前工作区是 git 仓库时，点击输入框工具行的 **Git 按钮**（分支图标 + 分支名）。

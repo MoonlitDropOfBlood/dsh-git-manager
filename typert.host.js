@@ -249,6 +249,13 @@ const METHODS = [
 ];
 
 function invocationOf(method, resultSchema) {
+  // strict codec 必须「双形态」（实测 21 个 typert-loader 版本的矩阵结论）：
+  //   - ≤0.1.6-alpha.1：loader/registry/gateway 校验并使用 `schema`（zod 实例，`.parse`）
+  //   - ≥0.1.6-alpha.2（含 0.1.7-rc.x）：校验 `create()` 工厂，gateway 解码走 `codec.create().parse(...)`
+  // 两代校验各看一个键、互不检查对方，所以两个键并存才能同时通过新旧两端；
+  // 只写 schema 会在 0.1.7 的客户端 $mount 注册时抛 "strict codec has no create() factory"，
+  // 导致插件槽位注册失败、入口按钮不出现（表现为"插件加载不上"）。
+  const requestSchema = z.object({}).passthrough();
   return {
     id: "dsh-git-manager#gitManager/" + method,
     service: "gitManager",
@@ -263,7 +270,8 @@ function invocationOf(method, resultSchema) {
         codec: {
           mode: "strict",
           typeSymbol: "dsh-git-manager#GitManager" + method + "Request",
-          schema: z.object({}).passthrough(),
+          schema: requestSchema,
+          create: () => requestSchema,
         },
       },
     ],
@@ -271,6 +279,7 @@ function invocationOf(method, resultSchema) {
       mode: "strict",
       typeSymbol: "dsh-git-manager#GitManager" + method + "Result",
       schema: resultSchema,
+      create: () => resultSchema,
     },
     sourceLocation: { file: "index.js", line: 1, column: 1 },
   };
