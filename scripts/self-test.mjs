@@ -1308,11 +1308,37 @@ test("static: engines.dsh 宿主版本声明（dshmarket 显示/筛选/阻断数
   // 与 peer 对齐：dshmarket 显示全部声明的交集，同值才不会显示成 "A ∩ B"
   const peer = pkg.peerDependencies && pkg.peerDependencies["@deepseek-ai/dsh-typert-protocol"];
   check("engines 与 dsh-typert-protocol peer 同 range（市场交集显示单条）", typeof peer === "string" && top === peer);
-  // 0.1.7-rc.1 必须落在 range 内（market 以 includePrerelease 求值）
+  // 0.1.7-rc.1 与 0.2.0-rc.1 都必须落在 range 内。
+  // dshmarket 的显示/筛选以 includePrerelease 求值；0.2.0 起安装与 boot 还有
+  // dsh-app-boot.evaluatePluginCompatibility 硬门：peerDependencies 里每个
+  // @deepseek-ai/dsh* 都要 semver.satisfies(runtime, range, {includePrerelease:true})，
+  // 不满足直接拒装/跳过加载（"插件在 0.2.0 无法加载"的根因，2026-09-29 实测）。
   if (typeof top === "string") {
     // 复刻 dshmarket satisfiesRange(v, range, {includePrerelease:true}) 的语义做冒烟：
-    // 当前声明形式 "^x.y.z-rc.n" 展开为 >=x.y.z-rc.n <x.(y+1).0，rc 预发布落在区间内
-    check("range 形如 ^0.1.0-rc.7（0.1.7-rc.1 可满足）", /^\^0\.1\.\d+-rc\.\d+$/.test(top) || /^>=/.test(top));
+    // 每个 "||" 候选形如 "^x.y.z-rc.n"，展开为 >=x.y.z-rc.n <x.(y+1).0
+    const alts = top.split("||").map((s) => s.trim());
+    check(
+      "range 每个 || 候选形如 ^x.y.z-rc.n（rc 预发布落在区间内）",
+      alts.length >= 1 && alts.every((a) => /^\^\d+\.\d+\.\d+-rc\.\d+$/.test(a)),
+    );
+    const caretContains = (candidate, version) => {
+      const lo = candidate.match(/^\^(\d+)\.(\d+)\.(\d+)-rc\.(\d+)$/);
+      const hi = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/);
+      if (!lo || !hi) return false;
+      const n = (x) => Number(x);
+      // [major, minor, patch, rc]；同号下正式版（rc=∞）> 一切 rc
+      const lower = [n(lo[1]), n(lo[2]), n(lo[3]), n(lo[4])];
+      const ver = [n(hi[1]), n(hi[2]), n(hi[3]), hi[4] === undefined ? Infinity : n(hi[4])];
+      // >= x.y.z-rc.n
+      for (let i = 0; i < 3; i++) { if (ver[i] !== lower[i]) return ver[i] > lower[i]; }
+      if (ver[3] < lower[3]) return false;
+      // < x.(y+1).0 ⇔ major/minor 与下界同号（patch 相等已在上面确立）
+      return ver[0] === lower[0] && ver[1] === lower[1];
+    };
+    check(
+      "0.2.0-rc.1 落在 range 内（boot 兼容硬门需要，否则拒装）",
+      alts.some((a) => caretContains(a, "0.2.0-rc.1")),
+    );
   }
 });
 

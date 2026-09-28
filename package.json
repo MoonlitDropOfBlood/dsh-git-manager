@@ -1,6 +1,6 @@
 {
   "name": "@duke-dsh-plugins/dsh-git-manager",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "DSH 正式 bundle 插件：在 DSH Web UI 里管理 Git 工作区——入口在输入框「模式」选择器旁（仅 git 仓库显示），进入与设置同规格的居中面板：status/diff、分支管理、合并冲突解决、commit/fetch/pull/push、worktree 管理（添加后自动注册为 DSH 工作区）、带分支线图形的提交历史。",
   "repository": {
     "type": "git",
@@ -29,7 +29,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "dsh": "^0.1.0-rc.7"
+    "dsh": "^0.1.0-rc.7 || ^0.2.0-rc.1"
   },
   "dsh": {
     "bundle": {
@@ -39,12 +39,12 @@
       "platform": "web"
     },
     "engines": {
-      "dsh": "^0.1.0-rc.7"
+      "dsh": "^0.1.0-rc.7 || ^0.2.0-rc.1"
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.7"
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.7 || ^0.2.0-rc.1"
   },
   "dependencies": {
     "zod": "^4.4.3"
