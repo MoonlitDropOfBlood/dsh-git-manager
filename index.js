@@ -7,9 +7,11 @@
  * methods to the browser Client half under the `gitManager` Remote namespace.
  *
  * Responsibilities:
- *   - 29 Remote methods (§5 of plan): probe / overview / status / diff / log /
- *     branches / worktrees / conflictContent + all mutations (含 hunkApply 逐块操作、
- *     cherryPick 单提交拣选).
+ *   - 56 Remote methods（30 个 v1 + v2 §2.1/§2.2/§2.3 的 21 个 + P3-A §8.1/§8.3
+ *     的 5 个：rebasePlan/rebaseRun/fixupCommit/rebaseBranch/lineApply）：
+ *     probe / overview / status / diff / log / branches / worktrees /
+ *     conflictContent + 全部变更类（含 hunkApply 逐块操作、cherryPick 单提交
+ *     拣选、stageHunk 逐块暂存、lineApply 行级暂存/撤销）。
  *   - Path validation (fs.stat) + envelope wrapping (`{ok, value}` / `{ok, error}`).
  *   - GitError → user-friendly error code mapping (not-a-repo / dubious-ownership
  *     / auth-failed / timeout / too-large / git-missing / git-failed).
@@ -43,6 +45,7 @@ import {
   unstageFiles,
   discardFiles,
   applyHunk,
+  stageHunkFile,
   commitStaged,
   createBranch,
   switchBranch,
@@ -52,6 +55,7 @@ import {
   abortMerge,
   continueMerge,
   cherryPickCommit,
+  revertCommit,
   resolveConflictFile,
   fetchRemote,
   pullBranch,
@@ -60,6 +64,30 @@ import {
   removeWorktree,
   pruneWorktrees,
   initRepo,
+  getStashes,
+  stashPush,
+  stashPop,
+  stashApply,
+  stashDrop,
+  stashClear,
+  getTags,
+  createTag,
+  deleteTag,
+  resetRepo,
+  getBlame,
+  getDiffRange,
+  getReflog,
+  addRemote,
+  removeRemote,
+  renameRemote,
+  getConfig,
+  setConfig,
+  unsetConfig,
+  rebasePlan,
+  rebaseRun,
+  fixupCommit,
+  rebaseBranch,
+  applyLine,
 } from "./git-core.mjs";
 import { computeGraph } from "./git-graph.mjs";
 
@@ -170,6 +198,35 @@ export class GitManagerService extends TypertRemoteService {
     markRemoteMethod(this, "worktreeRemove", "worktreeRemove");
     markRemoteMethod(this, "worktreePrune", "worktreePrune");
     markRemoteMethod(this, "init", "init");
+    // v2 §2.1 stageHunk + §2.2 P1
+    markRemoteMethod(this, "stageHunk", "stageHunk");
+    markRemoteMethod(this, "stashList", "stashList");
+    markRemoteMethod(this, "stashPush", "stashPush");
+    markRemoteMethod(this, "stashPop", "stashPop");
+    markRemoteMethod(this, "stashApply", "stashApply");
+    markRemoteMethod(this, "stashDrop", "stashDrop");
+    markRemoteMethod(this, "stashClear", "stashClear");
+    markRemoteMethod(this, "tags", "tags");
+    markRemoteMethod(this, "tagCreate", "tagCreate");
+    markRemoteMethod(this, "tagDelete", "tagDelete");
+    markRemoteMethod(this, "reset", "reset");
+    markRemoteMethod(this, "revert", "revert");
+    markRemoteMethod(this, "blame", "blame");
+    markRemoteMethod(this, "diffRange", "diffRange");
+    markRemoteMethod(this, "reflog", "reflog");
+    // v2 §2.3 P2
+    markRemoteMethod(this, "remoteAdd", "remoteAdd");
+    markRemoteMethod(this, "remoteRemove", "remoteRemove");
+    markRemoteMethod(this, "remoteRename", "remoteRename");
+    markRemoteMethod(this, "configList", "configList");
+    markRemoteMethod(this, "configSet", "configSet");
+    markRemoteMethod(this, "configUnset", "configUnset");
+    // P3-A §8.1/§8.3（51 → 56）
+    markRemoteMethod(this, "rebasePlan", "rebasePlan");
+    markRemoteMethod(this, "rebaseRun", "rebaseRun");
+    markRemoteMethod(this, "fixupCommit", "fixupCommit");
+    markRemoteMethod(this, "rebaseBranch", "rebaseBranch");
+    markRemoteMethod(this, "lineApply", "lineApply");
   }
 
   // === query ===
@@ -351,6 +408,155 @@ export class GitManagerService extends TypertRemoteService {
       }
       return { ok: true, value: { probe: await initRepo(path) } };
     } catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // === v2 §2.1/§2.2：stageHunk + stash 全家 + tag 全家 + reset/revert/blame/diffRange/reflog ===
+
+  // IDEA 式「暂存此块」：unstaged diff 的第 hunkIndex 块正向进 index（非危险，无确认）
+  async stageHunk(request) {
+    try { validatePath(request.path); return { ok: true, value: { status: await stageHunkFile(request.path, request) } }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async stashList(request) {
+    try { validatePath(request.path); return { ok: true, value: await getStashes(request.path) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async stashPush(request) {
+    try { validatePath(request.path); return { ok: true, value: await stashPush(request.path, request.message, !!request.includeUntracked) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // pop/apply 冲突不抛错（git-core 契约）：返回 {status}，status.conflicted 非空即
+  // 交冲突页处理；stash 条目保留，中止走 abortMerge 兜底（Lead 裁决 2026-09-29）。
+  async stashPop(request) {
+    try { validatePath(request.path); return { ok: true, value: { status: await stashPop(request.path, request.index) } }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async stashApply(request) {
+    try { validatePath(request.path); return { ok: true, value: { status: await stashApply(request.path, request.index) } }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async stashDrop(request) {
+    try { validatePath(request.path); return { ok: true, value: await stashDrop(request.path, request.index) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async stashClear(request) {
+    try { validatePath(request.path); return { ok: true, value: await stashClear(request.path) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async tags(request) {
+    try { validatePath(request.path); return { ok: true, value: await getTags(request.path) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // message 非空 → annotated tag；name/sha 走白名单校验（防选项注入）
+  async tagCreate(request) {
+    try { validatePath(request.path); return { ok: true, value: await createTag(request.path, request.name, request.sha, request.message, !!request.force) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async tagDelete(request) {
+    try { validatePath(request.path); return { ok: true, value: await deleteTag(request.path, request.name) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // mode∈soft|mixed|hard、target 走白名单（sha/HEAD/HEAD~n/@{...}）；
+  // hard 不做 UI 确认（确认是 client 职责）
+  async reset(request) {
+    try { validatePath(request.path); return { ok: true, value: { status: await resetRepo(request.path, request.mode, request.target) } }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // 冲突不抛错：reverted=false + status，仓库进 REVERT_HEAD 态（与 cherryPick 同款）
+  async revert(request) {
+    try { validatePath(request.path); return { ok: true, value: await revertCommit(request.path, request.sha) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async blame(request) {
+    try { validatePath(request.path); return { ok: true, value: await getBlame(request.path, request) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async diffRange(request) {
+    try { validatePath(request.path); return { ok: true, value: await getDiffRange(request.path, request) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async reflog(request) {
+    try { validatePath(request.path); return { ok: true, value: await getReflog(request.path, request) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // === v2 §2.3 P2：remote 增删改 + config 读写（返回新列表，便于客户端刷新） ===
+
+  async remoteAdd(request) {
+    try { validatePath(request.path); return { ok: true, value: await addRemote(request.path, request.name, request.url, request.pushUrl) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async remoteRemove(request) {
+    try { validatePath(request.path); return { ok: true, value: await removeRemote(request.path, request.name) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async remoteRename(request) {
+    try { validatePath(request.path); return { ok: true, value: await renameRemote(request.path, request.oldName, request.newName) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async configList(request) {
+    try { validatePath(request.path); return { ok: true, value: await getConfig(request.path, !!request.global) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async configSet(request) {
+    try { validatePath(request.path); return { ok: true, value: await setConfig(request.path, request.key, request.value, !!request.global) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  async configUnset(request) {
+    try { validatePath(request.path); return { ok: true, value: await unsetConfig(request.path, request.key, !!request.global) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // === P3-A §8.1/§8.3：rebase 全家 + 行级暂存/撤销 ===
+
+  // todo 候选：base..HEAD（不含 base），最旧在前（rebase todo 应用顺序）
+  async rebasePlan(request) {
+    try { validatePath(request.path); return { ok: true, value: await rebasePlan(request.path, request.base) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // entries 条目 action 枚举 + sha 白名单校验（防 todo 注入）；
+  // 冲突/ edit 停驻不抛错：done=false + status，进 rebase 态
+  async rebaseRun(request) {
+    try { validatePath(request.path); return { ok: true, value: await rebaseRun(request.path, request.base, request.entries) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // 用暂存改动修正任意历史提交（改写历史，UI 二次确认）；squash+message 替换合并信息
+  async fixupCommit(request) {
+    try { validatePath(request.path); return { ok: true, value: await fixupCommit(request.path, request.sha, request.mode, request.message) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // 当前分支 rebase 到 branch 之上（二次确认同 merge 级；冲突走冲突页）
+  async rebaseBranch(request) {
+    try { validatePath(request.path); return { ok: true, value: await rebaseBranch(request.path, request.branch) }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
+  }
+
+  // 行级操作：scope/mode 组合白名单（unstaged/stage、staged/unstage、unstaged/discard）
+  async lineApply(request) {
+    try { validatePath(request.path); return { ok: true, value: { status: await applyLine(request.path, request) } }; }
+    catch (e) { return { ok: false, error: mapGitError(e) }; }
   }
 }
 

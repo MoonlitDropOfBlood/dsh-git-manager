@@ -59,6 +59,8 @@ const commitSchema = z.object({
   at: z.number().readonly(),
   refs: z.string().readonly(),
   subject: z.string().readonly(),
+  // v2 §6：subject 之后的多行正文（amend 预填用）；无正文挂 ""（字段稳定）
+  body: z.string().readonly().optional(),
 }).readonly();
 
 const graphSchema = z.object({
@@ -121,6 +123,57 @@ const remoteSchema = z.object({
   name: z.string().readonly(),
   fetchUrl: z.string().readonly().nullable(),
   pushUrl: z.string().readonly().nullable(),
+}).readonly();
+
+// ---- v2 §2.2 新增数据形状（strict、readonly；可选字段有值才挂） ----
+
+const stashEntrySchema = z.object({
+  index: z.number().readonly(),
+  ref: z.string().readonly(),
+  subject: z.string().readonly(),
+  at: z.number().readonly(),
+}).readonly();
+
+const tagInfoSchema = z.object({
+  name: z.string().readonly(),
+  sha: z.string().readonly(),
+  short: z.string().readonly(),
+  subject: z.string().readonly(),
+  at: z.number().readonly(),
+  annotated: z.boolean().readonly(),
+  message: z.string().readonly().optional(),
+}).readonly();
+
+const blameLineSchema = z.object({
+  sha: z.string().readonly(),
+  short: z.string().readonly(),
+  author: z.string().readonly(),
+  at: z.number().readonly(),
+  line: z.number().readonly(),
+  text: z.string().readonly(),
+}).readonly();
+
+const reflogEntrySchema = z.object({
+  sha: z.string().readonly(),
+  short: z.string().readonly(),
+  selector: z.string().readonly(),
+  message: z.string().readonly(),
+  at: z.number().readonly(),
+}).readonly();
+
+const configEntrySchema = z.object({
+  key: z.string().readonly(),
+  value: z.string().readonly(),
+}).readonly();
+
+// P3-A §8.1：rebase todo 条目（action ∈ pick|squash|fixup|drop|edit，Host 枚举校验；
+// message 仅 squash 有值才挂）
+const rebaseTodoSchema = z.object({
+  sha: z.string().readonly(),
+  short: z.string().readonly(),
+  subject: z.string().readonly(),
+  action: z.string().readonly(),
+  message: z.string().readonly().optional(),
 }).readonly();
 
 const branchesValueSchema = z.object({
@@ -213,6 +266,56 @@ const fetchResult = netResult(fetchValueSchema);
 const worktreeMutResult = result(worktreesValueSchema);
 const initResult = result(z.object({ probe: probeSchema }).readonly());
 
+// ---- v2 §2.2/§2.3 新增 result schemas -----------------------------------
+
+const stashesValueSchema = z.object({
+  stashes: z.array(stashEntrySchema).readonly(),
+}).readonly();
+const tagsValueSchema = z.object({
+  tags: z.array(tagInfoSchema).readonly(),
+}).readonly();
+const blameValueSchema = z.object({
+  lines: z.array(blameLineSchema).readonly(),
+  truncated: z.boolean().readonly(),
+}).readonly();
+const reflogValueSchema = z.object({
+  entries: z.array(reflogEntrySchema).readonly(),
+}).readonly();
+const configValueSchema = z.object({
+  entries: z.array(configEntrySchema).readonly(),
+}).readonly();
+const remotesValueSchema = z.object({
+  remotes: z.array(remoteSchema).readonly(),
+}).readonly();
+// revert 与 cherry-pick 同款契约：冲突 reverted=false 不抛错，进 REVERT_HEAD 态
+const revertValueSchema = z.object({
+  reverted: z.boolean().readonly(),
+  status: statusSchema,
+}).readonly();
+
+const stashesResult = result(stashesValueSchema);
+const tagsResult = result(tagsValueSchema);
+const blameResult = result(blameValueSchema);
+const reflogResult = result(reflogValueSchema);
+const configResult = result(configValueSchema);
+const remoteListResult = result(remotesValueSchema); // v2 remoteAdd/Remove/Rename 返回 { remotes }
+const revertResult = result(revertValueSchema);
+
+// ---- P3-A（§8.1/§8.3）result schemas -----------------------------------
+
+// rebasePlan：todo 候选（base..HEAD 不含 base，最旧在前）
+const rebasePlanResult = result(z.object({
+  entries: z.array(rebaseTodoSchema).readonly(),
+}).readonly());
+// rebaseRun / fixupCommit / rebaseBranch 共款：done=false = 冲突或 edit 停驻进行中
+const rebaseDoneValueSchema = z.object({
+  done: z.boolean().readonly(),
+  status: statusSchema,
+}).readonly();
+const rebaseRunResult = result(rebaseDoneValueSchema);
+const fixupResult = result(rebaseDoneValueSchema);
+const rebaseBranchResult = result(rebaseDoneValueSchema);
+
 // ---- manifest ------------------------------------------------------------
 
 const METHODS = [
@@ -246,6 +349,35 @@ const METHODS = [
   ["worktreeRemove", worktreeMutResult],
   ["worktreePrune", worktreeMutResult],
   ["init", initResult],
+  // ---- v2 §2.1 stageHunk + §2.2 P1 ----
+  ["stageHunk", mutationResult],
+  ["stashList", stashesResult],
+  ["stashPush", stashesResult],
+  ["stashPop", mutationResult],
+  ["stashApply", mutationResult],
+  ["stashDrop", stashesResult],
+  ["stashClear", stashesResult],
+  ["tags", tagsResult],
+  ["tagCreate", tagsResult],
+  ["tagDelete", tagsResult],
+  ["reset", mutationResult],
+  ["revert", revertResult],
+  ["blame", blameResult],
+  ["diffRange", diffResult],
+  ["reflog", reflogResult],
+  // ---- v2 §2.3 P2 ----
+  ["remoteAdd", remoteListResult],
+  ["remoteRemove", remoteListResult],
+  ["remoteRename", remoteListResult],
+  ["configList", configResult],
+  ["configSet", configResult],
+  ["configUnset", configResult],
+  // ---- P3-A §8.1/§8.3（51 → 56）----
+  ["rebasePlan", rebasePlanResult],
+  ["rebaseRun", rebaseRunResult],
+  ["fixupCommit", fixupResult],
+  ["rebaseBranch", rebaseBranchResult],
+  ["lineApply", mutationResult],
 ];
 
 function invocationOf(method, resultSchema) {

@@ -1,0 +1,1960 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Git 管理面板 v2 — 交互设计 Demo</title>
+<!--
+  ============================================================
+  Git 管理面板 v2 — 交互设计 Demo（单文件 / 零外部依赖）
+  ------------------------------------------------------------
+  本文件仅为「交互效果预览」的设计 demo，不是插件本体。
+  - 所有数据均为前端 mock，无任何 git 调用、无网络请求。
+  - 重点演示：弹层层级（确认弹窗浮于 diff 窗口之上）与
+    Esc 逐层关闭顺序（确认框 → diff 窗口 → 面板）。
+  - 正式插件实现见仓库根目录 client.js / index.js。
+  ============================================================
+-->
+<style>
+/* ============ 设计令牌（亮/暗两套主题，切换只换变量值） ============ */
+:root{
+  --bg-app:#f3f4f6;
+  --bg-layer-1:#ffffff;
+  --bg-layer-2:#ffffff;
+  --bg-layer-3:#f7f8fa;
+  --bg-mask-1:rgba(15,17,21,.45);
+  --bg-hover:rgba(15,17,21,.06);
+  --label-primary:#1f2329;
+  --label-secondary:#646a73;
+  --label-tertiary:#8f959e;
+  --border:#dee0e3;
+  --border-strong:#c9ccd1;
+  --accent-info:#3370ff;
+  --accent-info-hover:#295fe0;
+  --danger:#d83931;
+  --danger-bg-hover:rgba(216,57,49,.10);
+  --success:#2ea121;
+  --success-bg:rgba(46,161,33,.12);
+  --warn:#ed7b2f;
+  --warn-bg:rgba(237,123,47,.12);
+  --nav-active-bg:#e6edff;
+  --shadow-lv3:0 12px 32px rgba(15,17,21,.18),0 2px 6px rgba(15,17,21,.08);
+  --diff-add-bg:rgba(46,161,33,.14);
+  --diff-add-label:#1f7a14;
+  --diff-del-bg:rgba(216,57,49,.12);
+  --diff-del-label:#b02a23;
+  --diff-hunk-bg:#eceef1;
+  --diff-hunk-label:#6b7280;
+  --code-bg:#f6f7f9;
+  --scrollbar:rgba(15,17,21,.18);
+  --mask-blur:blur(6px);
+  --graph-1:#3370ff; --graph-2:#2ea121; --graph-3:#ed7b2f; --graph-4:#a23ae0;
+}
+html[data-theme="dark"]{
+  --bg-app:#17181a;
+  --bg-layer-1:#1f2023;
+  --bg-layer-2:#232427;
+  --bg-layer-3:#2a2b2f;
+  --bg-mask-1:rgba(0,0,0,.58);
+  --bg-hover:rgba(255,255,255,.07);
+  --label-primary:#e8e9eb;
+  --label-secondary:#a8adb5;
+  --label-tertiary:#7d828b;
+  --border:#383a3f;
+  --border-strong:#4a4c52;
+  --accent-info:#4d8dff;
+  --accent-info-hover:#6ba1ff;
+  --danger:#f2635f;
+  --danger-bg-hover:rgba(242,99,95,.14);
+  --success:#4fbf3f;
+  --success-bg:rgba(79,191,63,.16);
+  --warn:#f2994a;
+  --warn-bg:rgba(242,153,74,.16);
+  --nav-active-bg:#2b3a5e;
+  --shadow-lv3:0 12px 32px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.35);
+  --diff-add-bg:rgba(79,191,63,.16);
+  --diff-add-label:#6fd35e;
+  --diff-del-bg:rgba(242,99,95,.15);
+  --diff-del-label:#ff8a86;
+  --diff-hunk-bg:#303237;
+  --diff-hunk-label:#9aa0a8;
+  --code-bg:#1b1c1f;
+  --scrollbar:rgba(255,255,255,.2);
+  --graph-1:#4d8dff; --graph-2:#4fbf3f; --graph-3:#f2994a; --graph-4:#c07af0;
+}
+
+/* ============ 基础 ============ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:13px;color:var(--label-primary);background:var(--bg-app);
+  overflow:hidden;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea,select{font:inherit;color:var(--label-primary)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ============ 模拟 DSH 聊天界面 ============ */
+.app{height:100vh;display:flex;flex-direction:column}
+.topbar{
+  height:48px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;
+  background:var(--bg-layer-1);border-bottom:1px solid var(--border);
+}
+.topbar .logo{width:22px;height:22px;border-radius:6px;background:var(--accent-info);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+.topbar .title{font-size:14px;font-weight:600}
+.topbar .spacer{flex:1}
+.chat{flex:1;overflow:hidden;padding:24px;display:flex;flex-direction:column;gap:14px}
+.msg{max-width:640px;padding:12px 14px;border-radius:14px;line-height:1.65}
+.msg.user{align-self:flex-end;background:var(--accent-info);color:#fff;border-bottom-right-radius:4px}
+.msg.bot{align-self:flex-start;background:var(--bg-layer-1);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg .hint{color:inherit;opacity:.75;font-size:12px;margin-top:6px}
+.composer{
+  flex:none;margin:0 24px 16px;padding:10px 12px;border-radius:16px;
+  background:var(--bg-layer-1);border:1px solid var(--border);
+}
+.composer .input-line{height:38px;display:flex;align-items:center;padding:0 10px;color:var(--label-tertiary);font-size:13px}
+.toolrow{display:flex;align-items:center;gap:8px;padding:6px 4px 0;border-top:1px solid var(--border);margin-top:8px}
+.toolrow .divider{width:1px;height:18px;background:var(--border);margin:0 2px}
+
+/* ============ 按钮 ============ */
+.btn{
+  height:30px;padding:0 12px;border-radius:8px;font-size:13px;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;
+  border:1px solid transparent;transition:background .12s,border-color .12s,opacity .12s;
+  user-select:none;
+}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent-info);color:#fff}
+.btn.primary:not(:disabled):hover{background:var(--accent-info-hover)}
+.btn.neutral{background:transparent;border-color:var(--border-strong);color:var(--label-primary)}
+.btn.neutral:not(:disabled):hover{background:var(--bg-hover)}
+.btn.ghost{color:var(--label-secondary)}
+.btn.ghost:not(:disabled):hover{background:var(--bg-hover);color:var(--label-primary)}
+.btn.danger{color:var(--danger);border-color:var(--danger);background:transparent}
+.btn.danger:not(:disabled):hover{background:var(--danger-bg-hover)}
+.btn.danger-fill{background:var(--danger);color:#fff;border-color:var(--danger)}
+.btn.danger-fill:not(:disabled):hover{filter:brightness(.92)}
+.btn.sm{height:26px;padding:0 9px;font-size:12px;border-radius:7px}
+
+/* ============ 全屏面板（z-index 1000） ============ */
+.gm-mask{
+  position:fixed;inset:0;z-index:1000;background:var(--bg-mask-1);
+  backdrop-filter:var(--mask-blur);-webkit-backdrop-filter:var(--mask-blur);
+  display:flex;align-items:center;justify-content:center;
+}
+.gm-panel{
+  width:800px;max-width:calc(100vw - 48px);height:min(800px,100vh - 48px);
+  border-radius:24px;background:var(--bg-layer-2);box-shadow:var(--shadow-lv3);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+@media (max-width:900px){
+  .gm-panel{width:calc(100vw - 32px);height:calc(100vh - 32px)}
+}
+.gm-head{flex:none;display:flex;align-items:center;gap:10px;padding:14px 18px 0}
+.gm-head .ttl{font-size:16px;font-weight:700}
+.gm-head .repo{font-size:12px;color:var(--label-tertiary)}
+.gm-head .spacer{flex:1}
+.gm-tabs{flex:none;display:flex;gap:2px;padding:10px 18px 0;border-bottom:1px solid var(--border)}
+.gm-tab{
+  height:32px;padding:0 14px;border-radius:8px 8px 0 0;font-size:13px;color:var(--label-secondary);
+  display:inline-flex;align-items:center;gap:6px;border-bottom:2px solid transparent;margin-bottom:-1px;
+}
+.gm-tab:hover{color:var(--label-primary);background:var(--bg-hover)}
+.gm-tab.active{color:var(--label-primary);background:var(--nav-active-bg);border-bottom-color:var(--accent-info);font-weight:600}
+.gm-badge{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--danger);color:#fff;
+  font-size:10px;display:inline-flex;align-items:center;justify-content:center}
+.gm-body{flex:1;overflow:hidden;position:relative}
+.gm-tabpage{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden}
+.gm-tabpage.active{display:flex}
+.gm-scroll{flex:1;overflow-y:auto;padding:12px 18px 18px}
+.gm-section{margin-bottom:16px}
+.gm-sec-title{font-size:12px;color:var(--label-tertiary);font-weight:600;margin:10px 0 6px;
+  display:flex;align-items:center;gap:8px}
+.gm-sec-title .spacer{flex:1}
+
+/* 卡片 / 列表 */
+.card{background:var(--bg-layer-1);border:1px solid var(--border);border-radius:12px;padding:12px}
+.flist{display:flex;flex-direction:column}
+.frow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;min-height:32px}
+.frow:hover{background:var(--bg-hover)}
+.frow .fname{font-family:ui-monospace,"SF Mono",Consolas,Menlo,monospace;font-size:12.5px;cursor:pointer}
+.frow .fname:hover{color:var(--accent-info);text-decoration:underline}
+.frow .meta{font-size:12px;color:var(--label-tertiary)}
+.frow .spacer{flex:1}
+.frow .rowbtns{display:none;gap:6px}
+.frow:hover .rowbtns{display:inline-flex}
+.st{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;
+  font-size:10px;font-weight:700;flex:none}
+.st-M{background:var(--warn-bg);color:var(--warn)}
+.st-A{background:var(--success-bg);color:var(--success)}
+.st-D{background:var(--danger-bg-hover);color:var(--danger)}
+.st-R{background:var(--warn-bg);color:var(--warn)}
+.st-U{background:var(--danger-bg-hover);color:var(--danger)}
+.branch-badge{font-size:11px;padding:1px 8px;border-radius:10px;background:var(--success-bg);color:var(--success);font-weight:600;flex:none}
+.empty{color:var(--label-tertiary);font-size:12px;padding:10px;text-align:center}
+
+/* 提交框 / 工具行 */
+.commitbox textarea{
+  width:100%;min-height:64px;resize:vertical;padding:8px 10px;border-radius:8px;
+  border:1px solid var(--border);background:var(--bg-layer-3);outline:none;line-height:1.5;
+}
+.commitbox textarea:focus{border-color:var(--accent-info)}
+.commitbox .cb-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--label-secondary);cursor:pointer;user-select:none}
+.toolbar{display:flex;align-items:center;gap:8px;margin:10px 0}
+.toolbar .spacer{flex:1}
+
+/* Stash 折叠区 */
+.fold-head{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;border-radius:8px;user-select:none}
+.fold-head:hover{background:var(--bg-hover)}
+.fold-head .arrow{transition:transform .15s;font-size:11px;color:var(--label-tertiary)}
+.fold-body.open .arrow{transform:rotate(90deg)}
+.fold-body{display:none;padding:2px 0 4px}
+.fold-body.open{display:block}
+
+/* ============ 弹层通用（z-index 1050 / 1100+，均直接挂 body） ============ */
+.gm-modal-mask{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px}
+.gm-modal{
+  background:var(--bg-layer-2);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-lv3);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.gm-modal .m-head{flex:none;display:flex;align-items:center;gap:8px;padding:14px 16px 0;font-size:15px;font-weight:700}
+.gm-modal .m-body{flex:1;overflow-y:auto;padding:12px 16px;font-size:13px;line-height:1.6}
+.gm-modal .m-foot{flex:none;display:flex;justify-content:flex-end;gap:8px;padding:0 16px 14px}
+.gm-modal .x{margin-left:auto;width:28px;height:28px;border-radius:8px;color:var(--label-tertiary);font-size:16px;
+  display:inline-flex;align-items:center;justify-content:center}
+.gm-modal .x:hover{background:var(--bg-hover);color:var(--label-primary)}
+.gm-confirm{width:420px;max-width:calc(100vw - 48px)}
+.gm-confirm.danger{border-color:var(--danger)}
+.gm-confirm .c-title{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700}
+.gm-confirm .c-title .dot{width:8px;height:8px;border-radius:50%;background:var(--danger);flex:none}
+.gm-confirm .c-msg{color:var(--label-secondary);margin-top:8px;line-height:1.6;word-break:break-all}
+.gm-form{width:480px;max-width:calc(100vw - 48px);max-height:calc(100vh - 96px)}
+.gm-form .f-item{margin-bottom:12px}
+.gm-form .f-item label{display:block;font-size:12px;color:var(--label-secondary);margin-bottom:5px}
+.gm-form input[type=text],.gm-form textarea,.gm-form select{
+  width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);
+  background:var(--bg-layer-3);outline:none;
+}
+.gm-form input:focus,.gm-form textarea:focus{border-color:var(--accent-info)}
+.gm-form textarea{resize:vertical;min-height:56px}
+.warn-line{display:flex;gap:8px;align-items:flex-start;background:var(--warn-bg);color:var(--warn);
+  border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.5;margin-bottom:12px}
+
+/* diff 窗口（z-index 1050） */
+.gm-diffwin{width:min(860px,calc(100vw - 48px));height:min(640px,calc(100vh - 96px))}
+.gm-diffwin .d-head{flex:none;display:flex;align-items:center;gap:8px;padding:12px 16px 0}
+.gm-diffwin .d-file{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:600}
+.gm-diffwin .d-tag{font-size:11px;padding:1px 8px;border-radius:10px;background:var(--bg-hover);color:var(--label-secondary)}
+.gm-diffwin .d-body{flex:1;overflow:auto;padding:10px 16px 14px;background:var(--code-bg)}
+.diff-file{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg-layer-1);margin-bottom:12px}
+.diff-file .df-head{padding:7px 12px;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--border);
+  display:flex;gap:10px;align-items:center;background:var(--bg-layer-3)}
+.df-head .add{color:var(--diff-add-label)} .df-head .del{color:var(--diff-del-label)}
+.hunk-ops{display:flex;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);background:var(--bg-layer-2)}
+.diff-line{font-family:ui-monospace,"SF Mono",Consolas,Menlo,monospace;font-size:12px;line-height:1.6;
+  padding:1px 12px 1px 0;white-space:pre;display:flex}
+.diff-line .ln{width:44px;flex:none;text-align:right;padding-right:10px;color:var(--label-tertiary);user-select:none}
+.diff-line.add{background:var(--diff-add-bg);color:var(--diff-add-label)}
+.diff-line.del{background:var(--diff-del-bg);color:var(--diff-del-label)}
+.diff-line.ctx{color:var(--label-secondary)}
+.diff-line.hunk{background:var(--diff-hunk-bg);color:var(--diff-hunk-label)}
+
+/* 历史 Tab */
+.hist-wrap{flex:1;display:flex;overflow:hidden}
+.hist-list{flex:1;overflow-y:auto;padding:12px 6px 12px 18px;min-width:0}
+.hist-row{display:flex;align-items:center;gap:8px;height:32px;padding-right:8px;border-radius:8px;cursor:pointer}
+.hist-row:hover{background:var(--bg-hover)}
+.hist-row.sel{background:var(--nav-active-bg)}
+.hist-row .sha{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--accent-info);flex:none;width:64px}
+.hist-row .subj{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-row .who{font-size:12px;color:var(--label-tertiary);flex:none}
+.hist-row .tm{font-size:12px;color:var(--label-tertiary);flex:none;width:78px;text-align:right}
+.hist-detail{
+  flex:none;width:300px;border-left:1px solid var(--border);background:var(--bg-layer-1);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.hist-detail .hd-head{flex:none;display:flex;align-items:center;gap:8px;padding:12px 14px 0;font-size:14px;font-weight:700}
+.hist-detail .hd-body{flex:1;overflow-y:auto;padding:10px 14px;font-size:12.5px}
+.hist-detail .hd-foot{flex:none;padding:10px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.kv{display:flex;gap:8px;margin-bottom:6px;line-height:1.5;word-break:break-all}
+.kv .k{color:var(--label-tertiary);flex:none;width:52px}
+.hd-msg{white-space:pre-wrap;background:var(--code-bg);border-radius:8px;padding:8px 10px;margin:6px 0 10px;
+  font-size:12px;color:var(--label-secondary)}
+.hfile{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px}
+.hfile:hover{background:var(--bg-hover)}
+.hfile .spacer{flex:1}
+.hfile .rowbtns{display:none;gap:6px}
+.hfile:hover .rowbtns{display:inline-flex}
+.filterbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 18px 0;flex:none}
+.filterbar input,.filterbar select{
+  height:30px;padding:0 9px;border-radius:8px;border:1px solid var(--border);
+  background:var(--bg-layer-3);outline:none;font-size:12.5px;width:130px;
+}
+.filterbar input:focus,.filterbar select:focus{border-color:var(--accent-info)}
+.filterbar input.date{width:118px}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.seg button{height:28px;padding:0 12px;font-size:12px;color:var(--label-secondary)}
+.seg button.on{background:var(--nav-active-bg);color:var(--label-primary);font-weight:600}
+.cmp-bar{
+  flex:none;display:none;align-items:center;gap:10px;margin:10px 18px 0;padding:8px 12px;
+  border-radius:10px;background:var(--nav-active-bg);font-size:12.5px;
+}
+.cmp-bar.show{display:flex}
+.cmp-bar .spacer{flex:1}
+.loadmore{padding:10px;text-align:center}
+
+/* 冲突 Tab */
+.conflict-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.conf-pane{border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.conf-pane .cp-head{padding:7px 12px;font-size:12px;font-weight:700;background:var(--bg-layer-3);border-bottom:1px solid var(--border)}
+.conf-pane pre{padding:10px 12px;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6;
+  white-space:pre-wrap;color:var(--label-secondary);max-height:220px;overflow:auto}
+.conf-pane.picked-l{border-color:var(--success)}
+.conf-pane.picked-r{border-color:var(--accent-info)}
+.conflict-file-bar{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.notice{display:flex;gap:8px;align-items:flex-start;background:var(--success-bg);color:var(--success);
+  border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.55;margin-bottom:12px}
+.notice.warn{background:var(--warn-bg);color:var(--warn)}
+
+/* 设置 Tab */
+.cfg-tabs{display:inline-flex;gap:2px;margin-bottom:10px}
+.cfg-table{width:100%;border-collapse:collapse}
+.cfg-table td{padding:5px 8px;border-bottom:1px solid var(--border);font-size:12.5px}
+.cfg-table td.k{font-family:ui-monospace,Consolas,monospace;color:var(--label-secondary);width:45%}
+.cfg-table td.v{font-family:ui-monospace,Consolas,monospace}
+.cfg-table .rowbtns{display:none;gap:6px}
+.cfg-table tr:hover .rowbtns{display:inline-flex}
+.cfg-edit{display:flex;gap:6px;align-items:center}
+.cfg-edit input{flex:1;height:26px;padding:0 8px;border-radius:6px;border:1px solid var(--accent-info);background:var(--bg-layer-3);outline:none;font-size:12px}
+
+/* ============ Toast ============ */
+.gm-toast{
+  position:fixed;left:50%;bottom:88px;transform:translateX(-50%);z-index:1400;
+  background:var(--bg-layer-2);color:var(--label-primary);border:1px solid var(--border);
+  box-shadow:var(--shadow-lv3);border-radius:10px;padding:9px 16px;font-size:13px;
+  opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;max-width:80vw;
+}
+.gm-toast.show{opacity:1;transform:translateX(-50%) translateY(-6px)}
+
+/* ============ 演示说明卡片 ============ */
+.demo-note{
+  position:fixed;right:16px;bottom:16px;z-index:900;width:330px;max-width:calc(100vw - 32px);
+  background:var(--bg-layer-2);border:1px solid var(--border);border-radius:14px;
+  box-shadow:var(--shadow-lv3);font-size:12.5px;overflow:hidden;
+}
+.demo-note .dn-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;user-select:none;font-weight:700;font-size:13px}
+.demo-note .dn-head .arrow{margin-left:auto;color:var(--label-tertiary);font-size:11px;transition:transform .15s}
+.demo-note.open .dn-head .arrow{transform:rotate(180deg)}
+.demo-note .dn-body{display:none;padding:0 12px 12px;color:var(--label-secondary);line-height:1.6}
+.demo-note.open .dn-body{display:block}
+.demo-note label{display:flex;gap:8px;align-items:flex-start;padding:3px 0;cursor:pointer}
+.demo-note input[type=checkbox]{margin-top:2px;accent-color:var(--accent-info)}
+.demo-note .dn-path{margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--code-bg);
+  font-size:11.5px;color:var(--label-tertiary);line-height:1.7}
+</style>
+</head>
+<body>
+
+<!-- ================= 模拟 DSH 聊天界面 ================= -->
+<div class="app">
+  <div class="topbar">
+    <div class="logo">D</div>
+    <div class="title">DeepSeek Harness</div>
+    <div class="meta" style="font-size:12px;color:var(--label-tertiary)">demo-project</div>
+    <div class="spacer"></div>
+    <button class="btn neutral sm" id="themeBtn">🌙 暗色</button>
+  </div>
+  <div class="chat">
+    <div class="msg user">帮我看一下工作区里有哪些改动，顺便把 src/app.js 里那段调试代码撤掉。</div>
+    <div class="msg bot">好的，打开下方的「Git 面板（demo）」即可查看变更、逐块撤销 diff、管理分支与历史。
+      <div class="hint">本页为纯前端交互 demo，所有数据均为 mock。</div>
+    </div>
+  </div>
+  <div class="composer">
+    <div class="input-line">给 demo-project 发消息…</div>
+    <div class="toolrow">
+      <span class="btn ghost sm" style="cursor:default">⚡ 模式</span>
+      <span class="btn ghost sm" style="cursor:default">📎 附件</span>
+      <div class="divider"></div>
+      <button class="btn neutral sm" id="openPanelBtn">⑂ Git 面板（demo）</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 演示说明卡片 ================= -->
+<div class="demo-note open" id="demoNote">
+  <div class="dn-head" id="dnHead">📋 演示说明（建议测试的交互）<span class="arrow">▼</span></div>
+  <div class="dn-body">
+    <label><input type="checkbox"> 1. 「撤销此块」确认弹窗浮在 diff 窗口<b>之上</b>（本次修复的 bug）</label>
+    <label><input type="checkbox"> 2. Esc 关闭顺序：确认框 → diff 窗口 → 面板（每次只关一层）</label>
+    <label><input type="checkbox"> 3. hard reset 必须打字 RESET 才能确认</label>
+    <label><input type="checkbox"> 4. 范围对比模式的两次点选流程</label>
+    <label><input type="checkbox"> 5. stash 冲突态的按钮分流</label>
+    <label><input type="checkbox"> 6. 亮/暗主题切换后无刺眼的硬编码色</label>
+    <div class="dn-path">目标路径：打开面板 → 变更 Tab 点 src/app.js 开 diff → 点 hunk「撤销此块」→ 红色确认弹窗浮于 diff 之上 → Esc×1 关确认 → Esc×2 关 diff → Esc×3 关面板</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============================================================
+ * Git 管理面板 v2 — 交互设计 Demo
+ * 纯前端 mock，单文件零依赖。重点：弹层层级 + Esc 逐层关闭。
+ * ============================================================ */
+
+/* ---------- 弹层栈：所有弹层（面板/diff/确认/表单）统一入栈 ---------- */
+const modalStack = []; // 每项 { close, kind }
+let nextZ = 1100;      // 确认/表单弹窗基准 z-index，叠层每层 +10
+
+function pushModal(entry){ modalStack.push(entry); }
+function removeModal(entry){
+  const i = modalStack.indexOf(entry);
+  if (i >= 0) modalStack.splice(i, 1);
+}
+/* 只关栈顶一层 */
+function closeTopModal(){
+  const top = modalStack[modalStack.length - 1];
+  if (top) top.close();
+}
+function closeAllModals(){
+  while (modalStack.length) modalStack[modalStack.length - 1].close();
+}
+
+/* document 级 Esc：永远只关栈顶；面板入栈，因此栈空 = 全关 */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  closeTopModal();
+});
+
+/* ---------- 通用：遮罩点击 + Esc 关闭的弹层骨架（直接挂 body） ---------- */
+function makeLayer({ zIndex, maskBlur = true, onClose }){
+  const mask = document.createElement('div');
+  mask.className = 'gm-modal-mask';
+  mask.style.zIndex = String(zIndex);
+  if (!maskBlur){
+    mask.style.backdropFilter = 'none';
+    mask.style.webkitBackdropFilter = 'none';
+  }
+  const entry = { close };
+  function close(){
+    removeModal(entry);
+    mask.remove();
+    if (onClose) onClose();
+  }
+  mask.addEventListener('mousedown', (e) => { if (e.target === mask) close(); });
+  document.body.appendChild(mask);
+  pushModal(entry);
+  return { mask, close };
+}
+
+/* ---------- 确认弹窗（z-index 1100+，可叠层） ---------- */
+function openConfirm({ title, message, danger = false, confirmText = '确认', cancelText = '取消', onConfirm }){
+  const { mask, close } = makeLayer({ zIndex: nextZ });
+  nextZ += 10; // 弹窗上再叠弹窗每层 +10
+  const box = document.createElement('div');
+  box.className = 'gm-modal gm-confirm' + (danger ? ' danger' : '');
+  box.setAttribute('role', 'dialog');
+  box.innerHTML =
+    '<div class="m-head"><div class="c-title">' + (danger ? '<span class="dot"></span>' : '') +
+    '<span class="ct"></span></div>' +
+    '<button class="x" title="关闭">✕</button></div>' +
+    '<div class="m-body"><div class="c-msg"></div></div>' +
+    '<div class="m-foot"><button class="btn ghost fc"></button><button class="btn fp"></button></div>';
+  box.querySelector('.ct').textContent = title;
+  box.querySelector('.c-msg').innerHTML = message;
+  const btnCancel = box.querySelector('.fc');
+  const btnOk = box.querySelector('.fp');
+  btnCancel.textContent = cancelText;
+  btnOk.textContent = confirmText;
+  if (danger) btnOk.classList.add('danger-fill'); else btnOk.classList.add('primary');
+  btnCancel.addEventListener('click', close);
+  box.querySelector('.x').addEventListener('click', close);
+  btnOk.addEventListener('click', () => { close(); if (onConfirm) onConfirm(); });
+  mask.appendChild(box);
+  btnOk.focus();
+  return { close };
+}
+
+/* ---------- 表单弹窗（z-index 1100+） ---------- */
+function openForm({ title, bodyNodes, footButtons, onOpen }){
+  const { mask, close } = makeLayer({ zIndex: nextZ });
+  nextZ += 10;
+  const box = document.createElement('div');
+  box.className = 'gm-modal gm-form';
+  box.setAttribute('role', 'dialog');
+  const head = document.createElement('div');
+  head.className = 'm-head';
+  const ttl = document.createElement('span');
+  ttl.textContent = title;
+  const x = document.createElement('button');
+  x.className = 'x'; x.title = '关闭'; x.textContent = '✕';
+  x.addEventListener('click', close);
+  head.appendChild(ttl); head.appendChild(x);
+  const body = document.createElement('div');
+  body.className = 'm-body';
+  const foot = document.createElement('div');
+  foot.className = 'm-foot';
+  const btnCancel = document.createElement('button');
+  btnCancel.className = 'btn ghost';
+  btnCancel.textContent = '取消';
+  btnCancel.addEventListener('click', close);
+  foot.appendChild(btnCancel);
+  box.appendChild(head); box.appendChild(body); box.appendChild(foot);
+  mask.appendChild(box);
+  const api = { close, body, foot };
+  (footButtons || []).forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'btn ' + (b.cls || 'primary');
+    btn.textContent = b.text;
+    if (b.disabled) btn.disabled = true;
+    btn.addEventListener('click', () => b.onClick && b.onClick(api, btn));
+    foot.insertBefore(btn, foot.firstChild === btnCancel ? btnCancel : null);
+    if (b.ref) api[b.ref] = btn;
+  });
+  if (onOpen) onOpen(api);
+  return api;
+}
+
+/* ---------- diff 窗口（z-index 1050） ---------- */
+function openDiffWindow({ title, tag, files, hunkActions }){
+  const { mask, close } = makeLayer({ zIndex: 1050 });
+  const box = document.createElement('div');
+  box.className = 'gm-modal gm-diffwin';
+  box.setAttribute('role', 'dialog');
+  const head = document.createElement('div');
+  head.className = 'd-head';
+  const f = document.createElement('span');
+  f.className = 'd-file'; f.textContent = title;
+  head.appendChild(f);
+  if (tag){
+    const t = document.createElement('span');
+    t.className = 'd-tag'; t.textContent = tag;
+    head.appendChild(t);
+  }
+  const sp = document.createElement('span'); sp.style.flex = '1'; head.appendChild(sp);
+  const x = document.createElement('button');
+  x.className = 'x'; x.title = '关闭'; x.textContent = '✕';
+  x.addEventListener('click', close);
+  head.appendChild(x);
+  const body = document.createElement('div');
+  body.className = 'd-body';
+  box.appendChild(head); box.appendChild(body);
+  mask.appendChild(box);
+
+  files.forEach(file => {
+    const wrap = document.createElement('div');
+    wrap.className = 'diff-file';
+    const fh = document.createElement('div');
+    fh.className = 'df-head';
+    fh.innerHTML = '<span></span><span class="spacer" style="flex:1"></span><span class="add"></span><span class="del"></span>';
+    fh.querySelector('span').textContent = file.name;
+    fh.querySelector('.add').textContent = '+' + file.add;
+    fh.querySelector('.del').textContent = '-' + file.del;
+    wrap.appendChild(fh);
+    file.hunks.forEach((hunk, hi) => {
+      if (hunkActions){
+        const ops = document.createElement('div');
+        ops.className = 'hunk-ops';
+        hunkActions.forEach(act => {
+          const b = document.createElement('button');
+          b.className = 'btn sm ' + act.cls;
+          b.textContent = act.text;
+          b.addEventListener('click', () => act.onClick(file, hunk, hi, close));
+          ops.appendChild(b);
+        });
+        wrap.appendChild(ops);
+      }
+      const hk = document.createElement('div');
+      hk.className = 'diff-line hunk';
+      hk.innerHTML = '<span class="ln"></span><span class="tx"></span>';
+      hk.querySelector('.tx').textContent = hunk.header;
+      wrap.appendChild(hk);
+      hunk.lines.forEach(L => {
+        const d = document.createElement('div');
+        d.className = 'diff-line ' + (L.t === '+' ? 'add' : L.t === '-' ? 'del' : 'ctx');
+        d.innerHTML = '<span class="ln"></span><span class="tx"></span>';
+        d.querySelector('.ln').textContent = (L.old || '') + (L.t === 'ctx' ? ' ' : '');
+        d.querySelector('.tx').textContent = L.t + ' ' + L.txt;
+        wrap.appendChild(d);
+      });
+    });
+    body.appendChild(wrap);
+  });
+  return { close };
+}
+
+/* ---------- Toast ---------- */
+let toastTimer = null;
+function toast(msg){
+  let el = document.querySelector('.gm-toast');
+  if (!el){
+    el = document.createElement('div');
+    el.className = 'gm-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  requestAnimationFrame(() => el.classList.add('show'));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+/* ---------- 工具 ---------- */
+function el(tag, cls, text){
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ============================================================
+ * Mock 状态（集中管理，操作真实改状态并刷新渲染）
+ * ============================================================ */
+const state = {
+  theme: 'light',
+  tab: 'changes',
+  amend: false,
+  stashOpen: false,
+  branches: [
+    { name: 'main', current: true },
+    { name: 'develop', current: false },
+    { name: 'feature/x', current: false },
+  ],
+  tags: [
+    { name: 'v1.0.0', target: 'HEAD', annotated: true, msg: '首个正式版本', pushed: true },
+    { name: 'v0.9.0', target: 'HEAD~4', annotated: false, msg: '', pushed: false },
+  ],
+  unstaged: [
+    { path: 'src/app.js', status: 'M', add: 12, del: 3 },
+    { path: 'src/utils/helper.js', status: 'M', add: 2, del: 5 },
+    { path: 'README.md', status: 'D', add: 0, del: 8 },
+  ],
+  staged: [
+    { path: 'package.json', status: 'M', add: 4, del: 1 },
+    { path: 'docs/intro.md', status: 'A', add: 20, del: 0 },
+  ],
+  untracked: [
+    { path: 'scripts/new-tool.mjs', status: 'U', add: 15, del: 0 },
+    { path: 'tmp/notes.txt', status: 'U', add: 3, del: 0 },
+  ],
+  stashes: [
+    { index: 0, subject: 'WIP: 重构 diff 渲染', time: '2 小时前', untracked: false },
+    { index: 1, subject: '临时改动：调试日志', time: '昨天 18:32', untracked: true },
+  ],
+  commits: [
+    { sha: 'a1b2c3d', full: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678', subject: 'feat: 分支线渲染降噪', author: 'Duke', date: '2026-09-28', time: '2 小时前', parents: ['e5f6a7b'], merge: false,
+      msg: 'feat: 分支线渲染降噪\n\n- parent 竖线 opacity 0.45 作为背景骨架\n- merge 斜线 0.7/1.25px\n- 跨度 >24 行的边做三段式省略',
+      files: [ { path: 'src/graph.js', s: 'M', add: 42, del: 10 }, { path: 'src/render.js', s: 'M', add: 18, del: 6 } ] },
+    { sha: 'e5f6a7b', full: 'e5f6a7b8c9d0e1f203142536475869708090a1b2', subject: 'Merge branch \'feature/x\' into develop', author: 'Duke', date: '2026-09-27', time: '昨天', parents: ['c3d4e5f','7788a99'], merge: true,
+      msg: 'Merge branch \'feature/x\' into develop',
+      files: [ { path: 'src/app.js', s: 'M', add: 30, del: 12 }, { path: 'src/x.js', s: 'A', add: 88, del: 0 } ] },
+    { sha: 'c3d4e5f', full: 'c3d4e5f60718293a4b5c6d7e8f9012345678a1b2', subject: 'fix: hunk 撤销在子目录下失效', author: 'Ada', date: '2026-09-27', time: '昨天', parents: ['9920aab'], merge: false,
+      msg: 'fix: hunk 撤销在子目录下失效\n\npatch 内是仓库根相对路径，cwd 为子目录时 git apply 匹配不到。\n修复：统一在 probe.toplevel 下执行。',
+      files: [ { path: 'git-core.mjs', s: 'M', add: 9, del: 4 } ] },
+    { sha: '7788a99', full: '7788a9900112233445566778899001122334455', subject: 'feat: worktree 自动注册工作区', author: 'Duke', date: '2026-09-26', time: '2 天前', parents: ['9920aab'], merge: false,
+      msg: 'feat: worktree 自动注册工作区',
+      files: [ { path: 'index.js', s: 'M', add: 22, del: 3 }, { path: 'client.js', s: 'M', add: 35, del: 8 } ] },
+    { sha: '9920aab', full: '9920aabbccddeeff0011223344556677889900aa', subject: 'chore: 升级依赖', author: 'Bot', date: '2026-09-25', time: '3 天前', parents: ['ddeeff0'], merge: false,
+      msg: 'chore: 升级依赖',
+      files: [ { path: 'package.json', s: 'M', add: 6, del: 6 } ] },
+    { sha: 'ddeeff0', full: 'ddeeff0011223344556677889900aabbccddeeff', subject: 'docs: 更新 README', author: 'Ada', date: '2026-09-24', time: '4 天前', parents: [], merge: false,
+      msg: 'docs: 更新 README',
+      files: [ { path: 'README.md', s: 'M', add: 14, del: 2 } ] },
+  ],
+  commitsShown: 6,
+  histMode: 'commits', // commits | reflog
+  filters: { ref: 'all', path: '', author: '', grep: '', since: '', until: '' },
+  selCommit: null,
+  compare: null, // { base, target, picking: 'base'|'target'|null }
+  conflictStash: false,
+  conflictChoice: null, // 'left' | 'right' | null
+  worktrees: [
+    { path: 'D:/repo', branch: 'main', head: 'a1b2c3d' },
+    { path: 'D:/repo-wt-fix', branch: 'fix/typo', head: 'c3d4e5f' },
+  ],
+  remotes: [
+    { name: 'origin', fetch: 'https://github.com/duke/demo.git', push: 'https://github.com/duke/demo.git' },
+  ],
+  cfgScope: 'local',
+  cfg: {
+    local: [ { k: 'user.name', v: 'Duke' }, { k: 'user.email', v: 'duke@example.com' }, { k: 'core.autocrlf', v: 'true' } ],
+    global: [ { k: 'user.name', v: 'Duke' }, { k: 'init.defaultBranch', v: 'main' }, { k: 'core.autocrlf', v: 'false' } ],
+  },
+};
+
+/* ---------- mock diff 文本 ---------- */
+function mockDiffFor(path, staged){
+  if (path === 'src/app.js'){
+    return { name: path, add: staged ? 12 : 12, del: 3, hunks: [
+      { header: '@@ -12,6 +12,9 @@ export function boot()',
+        lines: [
+          { t: 'ctx', old: 12, txt: 'export function boot() {' },
+          { t: 'ctx', old: 13, txt: '  const store = createStore();' },
+          { t: '-', old: 14, txt: '  console.log("debug: boot", store);' },
+          { t: '+', old: '', txt: '  // 初始化面板' },
+          { t: '+', old: '', txt: '  const panel = createPanel(store);' },
+          { t: '+', old: '', txt: '  panel.mount();' },
+          { t: 'ctx', old: 15, txt: '  return store;' },
+        ] },
+      { header: '@@ -40,4 +43,6 @@ export function boot()',
+        lines: [
+          { t: 'ctx', old: 40, txt: '  if (!store.ready) {' },
+          { t: '-', old: 41, txt: '    throw new Error("not ready");' },
+          { t: '+', old: '', txt: '    logger.warn("store not ready, retry");' },
+          { t: '+', old: '', txt: '    return retryBoot();' },
+          { t: 'ctx', old: 42, txt: '  }' },
+        ] },
+    ] };
+  }
+  return { name: path, add: 6, del: 2, hunks: [
+    { header: '@@ -3,5 +3,7 @@',
+      lines: [
+        { t: 'ctx', old: 3, txt: '// ' + path },
+        { t: '-', old: 4, txt: '-  old line in ' + path },
+        { t: '+', old: '', txt: '+  new line in ' + path },
+        { t: '+', old: '', txt: '+  another line' },
+        { t: 'ctx', old: 5, txt: '// end' },
+      ] },
+  ] };
+}
+
+/* ============================================================
+ * 全屏面板（z-index 1000，入 modalStack）
+ * ============================================================ */
+let panelApi = null;
+
+function openPanel(){
+  if (panelApi) return;
+  const mask = el('div', 'gm-mask');
+  mask.style.zIndex = '1000';
+  const panel = el('div', 'gm-panel');
+  panel.setAttribute('role', 'dialog');
+  mask.appendChild(panel);
+  document.body.appendChild(mask);
+
+  /* 头部 */
+  const head = el('div', 'gm-head');
+  head.appendChild(el('span', 'ttl', 'Git 管理面板'));
+  head.appendChild(el('span', 'repo', 'demo-project · main'));
+  head.appendChild(el('span', 'spacer'));
+  const x = el('button', 'x', '✕');
+  x.title = '关闭';
+  x.addEventListener('click', close);
+  head.appendChild(x);
+  panel.appendChild(head);
+
+  /* Tabs */
+  const tabs = el('div', 'gm-tabs');
+  const TABS = [ ['changes','变更'], ['branches','分支'], ['history','历史'], ['conflicts','冲突'], ['worktree','Worktree'], ['settings','设置'] ];
+  const tabBtns = {};
+  TABS.forEach(([id, label]) => {
+    const b = el('button', 'gm-tab' + (state.tab === id ? ' active' : ''), label);
+    if (id === 'conflicts'){
+      const badge = el('span', 'gm-badge', '1');
+      b.appendChild(badge);
+    }
+    b.addEventListener('click', () => { state.tab = id; switchTab(); });
+    tabBtns[id] = b;
+    tabs.appendChild(b);
+  });
+  panel.appendChild(tabs);
+
+  /* 内容区 */
+  const bodyWrap = el('div', 'gm-body');
+  const pages = {};
+  TABS.forEach(([id]) => {
+    const p = el('div', 'gm-tabpage' + (state.tab === id ? ' active' : ''));
+    p.dataset.tab = id;
+    pages[id] = p;
+    bodyWrap.appendChild(p);
+  });
+  panel.appendChild(bodyWrap);
+
+  const entry = { close };
+  function close(){
+    removeModal(entry);
+    mask.remove();
+    panelApi = null;
+  }
+  mask.addEventListener('mousedown', (e) => { if (e.target === mask) close(); });
+  pushModal(entry);
+  panelApi = { close, pages, tabBtns, switchTab };
+
+  function switchTab(){
+    Object.keys(tabBtns).forEach(id => tabBtns[id].classList.toggle('active', id === state.tab));
+    Object.keys(pages).forEach(id => pages[id].classList.toggle('active', id === state.tab));
+    renderTab(state.tab);
+  }
+  switchTab();
+}
+
+/* 每 Tab 一个渲染函数 */
+function renderTab(id){
+  ({ changes: renderChanges, branches: renderBranches, history: renderHistory,
+     conflicts: renderConflicts, worktree: renderWorktree, settings: renderSettings })[id]();
+}
+
+/* ============================================================
+ * Tab 1 · 变更
+ * ============================================================ */
+function renderChanges(){
+  const page = panelApi.pages.changes;
+  page.innerHTML = '';
+  const scroll = el('div', 'gm-scroll');
+
+  /* 提交框 */
+  const box = el('div', 'card commitbox');
+  const ta = document.createElement('textarea');
+  ta.placeholder = '提交信息（支持多行）';
+  ta.value = state.commitMsg || '';
+  ta.addEventListener('input', () => { state.commitMsg = ta.value; });
+  box.appendChild(ta);
+  const cbRow = el('div', 'cb-row');
+  const amendLabel = el('label', 'chk');
+  const amendChk = document.createElement('input');
+  amendChk.type = 'checkbox';
+  amendChk.checked = state.amend;
+  amendChk.addEventListener('change', () => { state.amend = amendChk.checked; });
+  amendLabel.appendChild(amendChk);
+  amendLabel.appendChild(document.createTextNode('amend（修订上次提交）'));
+  cbRow.appendChild(amendLabel);
+  cbRow.appendChild(el('span', 'spacer'));
+  const btnCommit = el('button', 'btn primary', '提交');
+  btnCommit.addEventListener('click', () => {
+    if (!state.commitMsg && !state.amend){ toast('请先填写提交信息'); return; }
+    state.staged = [];
+    state.commitMsg = '';
+    state.amend = false;
+    toast('已提交（demo）');
+    renderChanges();
+  });
+  cbRow.appendChild(btnCommit);
+  box.appendChild(cbRow);
+  scroll.appendChild(box);
+
+  /* 工具行 */
+  const tb = el('div', 'toolbar');
+  const bStageAll = el('button', 'btn neutral sm', '暂存全部');
+  bStageAll.addEventListener('click', () => {
+    state.staged = state.staged.concat(state.unstaged.map(f => ({ ...f })));
+    state.unstaged = [];
+    toast('已暂存全部改动');
+    renderChanges();
+  });
+  const bUnstageAll = el('button', 'btn neutral sm', '取消暂存全部');
+  bUnstageAll.addEventListener('click', () => {
+    state.unstaged = state.unstaged.concat(state.staged.map(f => ({ ...f })));
+    state.staged = [];
+    toast('已取消暂存全部');
+    renderChanges();
+  });
+  const bRefresh = el('button', 'btn ghost sm', '⟳ 刷新');
+  bRefresh.addEventListener('click', () => { toast('已刷新（mock）'); renderChanges(); });
+  tb.appendChild(bStageAll); tb.appendChild(bUnstageAll); tb.appendChild(bRefresh);
+  scroll.appendChild(tb);
+
+  /* 三个文件列表 */
+  scroll.appendChild(fileListSection('未暂存改动', state.unstaged, 'unstaged'));
+  scroll.appendChild(fileListSection('已暂存', state.staged, 'staged'));
+  scroll.appendChild(fileListSection('未跟踪', state.untracked, 'untracked'));
+
+  /* Stash 折叠区 */
+  const fold = el('div', 'gm-section');
+  const foldHead = el('div', 'fold-head' + (state.stashOpen ? ' fold-body open' : ''));
+  const arrow = el('span', 'arrow', '▶');
+  foldHead.appendChild(arrow);
+  foldHead.appendChild(el('span', '', 'Stash'));
+  foldHead.appendChild(el('span', 'meta', state.stashes.length + ' 条'));
+  foldHead.appendChild(el('span', 'spacer'));
+  const bStashPush = el('button', 'btn neutral sm', '暂存更改到 stash…');
+  bStashPush.addEventListener('click', (e) => { e.stopPropagation(); openStashPushForm(); });
+  const bStashClear = el('button', 'btn danger sm', '清空 stash');
+  bStashClear.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openConfirm({
+      title: '清空 stash', danger: true, confirmText: '全部删除',
+      message: '将删除全部 <b>' + state.stashes.length + '</b> 条 stash 记录，且不可恢复。确定继续吗？',
+      onConfirm: () => { state.stashes = []; toast('stash 已清空'); renderChanges(); },
+    });
+  });
+  foldHead.appendChild(bStashPush); foldHead.appendChild(bStashClear);
+  fold.appendChild(foldHead);
+  const foldBody = el('div', 'fold-body' + (state.stashOpen ? ' open' : ''));
+  const flist = el('div', 'flist');
+  if (!state.stashes.length) flist.appendChild(el('div', 'empty', '暂无 stash'));
+  state.stashes.forEach((s, idx) => {
+    const row = el('div', 'frow');
+    row.appendChild(el('span', 'meta', 'stash@{' + s.index + '}'));
+    row.appendChild(el('span', 'fname', s.subject));
+    if (s.untracked) row.appendChild(el('span', 'meta', '(含未跟踪)'));
+    row.appendChild(el('span', 'meta', s.time));
+    row.appendChild(el('span', 'spacer'));
+    const btns = el('span', 'rowbtns');
+    const bApply = el('button', 'btn neutral sm', '应用');
+    bApply.addEventListener('click', () => { toast('已应用 stash@{' + s.index + '}（保留条目）'); });
+    const bPop = el('button', 'btn neutral sm', '弹出');
+    bPop.addEventListener('click', () => {
+      state.stashes.splice(idx, 1);
+      state.stashes.forEach((x, i) => x.index = i);
+      toast('已弹出 stash@{' + s.index + '}');
+      renderChanges();
+    });
+    const bDel = el('button', 'btn danger sm', '删除');
+    bDel.addEventListener('click', () => {
+      openConfirm({
+        title: '删除 stash 条目', danger: true, confirmText: '删除',
+        message: '删除 <b>stash@{' + s.index + '}</b>：' + esc(s.subject) + '？该操作不可恢复。',
+        onConfirm: () => {
+          state.stashes.splice(idx, 1);
+          state.stashes.forEach((x, i) => x.index = i);
+          toast('已删除 stash@{' + s.index + '}');
+          renderChanges();
+        },
+      });
+    });
+    btns.appendChild(bApply); btns.appendChild(bPop); btns.appendChild(bDel);
+    row.appendChild(btns);
+    flist.appendChild(row);
+  });
+  foldBody.appendChild(flist);
+  fold.appendChild(foldBody);
+  foldHead.addEventListener('click', () => {
+    state.stashOpen = !state.stashOpen;
+    foldHead.classList.toggle('open', state.stashOpen);
+    foldBody.classList.toggle('open', state.stashOpen);
+  });
+  scroll.appendChild(fold);
+  page.appendChild(scroll);
+}
+
+function fileListSection(title, list, kind){
+  const sec = el('div', 'gm-section');
+  sec.appendChild(el('div', 'gm-sec-title', title + '（' + list.length + '）'));
+  const flist = el('div', 'flist card');
+  if (!list.length) flist.appendChild(el('div', 'empty', '无'));
+  list.forEach((f, idx) => {
+    const row = el('div', 'frow');
+    const st = el('span', 'st st-' + f.status, f.status);
+    row.appendChild(st);
+    const name = el('span', 'fname', f.path);
+    name.title = '查看 diff';
+    name.addEventListener('click', () => openFileDiff(f, kind));
+    row.appendChild(name);
+    row.appendChild(el('span', 'meta', '+' + f.add + ' −' + f.del));
+    row.appendChild(el('span', 'spacer'));
+    const btns = el('span', 'rowbtns');
+
+    if (kind === 'unstaged' || kind === 'untracked'){
+      const bStage = el('button', 'btn neutral sm', '暂存');
+      bStage.addEventListener('click', () => {
+        state.unstaged = state.unstaged.filter(x => x !== f);
+        state.untracked = state.untracked.filter(x => x !== f);
+        state.staged.push(f);
+        toast('已暂存 ' + f.path);
+        renderChanges();
+      });
+      const bBlame = el('button', 'btn ghost sm', 'Blame');
+      bBlame.addEventListener('click', () => toast('Blame 视图（demo 占位）'));
+      const bDiscard = el('button', 'btn danger sm', '丢弃');
+      bDiscard.addEventListener('click', () => {
+        openConfirm({
+          title: '丢弃改动', danger: true, confirmText: '丢弃',
+          message: kind === 'untracked'
+            ? '删除未跟踪文件 <b>' + esc(f.path) + '</b>？该操作不可恢复。'
+            : '丢弃 <b>' + esc(f.path) + '</b> 中未暂存的改动？该操作不可恢复。',
+          onConfirm: () => {
+            state.unstaged = state.unstaged.filter(x => x !== f);
+            state.untracked = state.untracked.filter(x => x !== f);
+            toast('已丢弃 ' + f.path);
+            renderChanges();
+          },
+        });
+      });
+      btns.appendChild(bStage); btns.appendChild(bBlame); btns.appendChild(bDiscard);
+    } else if (kind === 'staged'){
+      const bUnstage = el('button', 'btn neutral sm', '取消暂存');
+      bUnstage.addEventListener('click', () => {
+        state.staged = state.staged.filter(x => x !== f);
+        state.unstaged.push(f);
+        toast('已取消暂存 ' + f.path);
+        renderChanges();
+      });
+      const bDiscard = el('button', 'btn danger sm', '丢弃');
+      bDiscard.addEventListener('click', () => {
+        openConfirm({
+          title: '丢弃暂存', danger: true, confirmText: '丢弃',
+          message: '把 <b>' + esc(f.path) + '</b> 移出暂存区并丢弃这些改动？该操作不可恢复。',
+          onConfirm: () => {
+            state.staged = state.staged.filter(x => x !== f);
+            toast('已丢弃暂存的 ' + f.path);
+            renderChanges();
+          },
+        });
+      });
+      btns.appendChild(bUnstage); btns.appendChild(bDiscard);
+    }
+    row.appendChild(btns);
+    flist.appendChild(row);
+  });
+  sec.appendChild(flist);
+  return sec;
+}
+
+function openFileDiff(f, kind){
+  const staged = (kind === 'staged');
+  const actions = staged
+    ? [ { text: '取消暂存此块', cls: 'neutral', onClick: (file) => {
+          state.staged = state.staged.filter(x => x.path !== file.name);
+          if (!state.unstaged.some(x => x.path === file.name))
+            state.unstaged.unshift({ path: file.name, status: 'M', add: file.add, del: file.del });
+          toast('已取消暂存此块（移回工作区，不丢内容）');
+          renderChanges();
+        } } ]
+    : [ { text: '暂存此块', cls: 'neutral', onClick: () => toast('已暂存此块（demo）') },
+        { text: '撤销此块', cls: 'danger', onClick: (file) => {
+          /* 关键演示：确认弹窗 z-index 1100 > diff 窗口 1050，浮于其上 */
+          openConfirm({
+            title: '撤销此块', danger: true, confirmText: '撤销此块',
+            message: '将撤销 <b>' + esc(file.name) + '</b> 中此 hunk 的改动并写回工作区，不可恢复。确定继续吗？',
+            onConfirm: () => toast('已撤销此块（demo）'),
+          });
+        } } ];
+  openDiffWindow({
+    title: f.path,
+    tag: staged ? '已暂存' : (kind === 'untracked' ? '未跟踪' : '未暂存'),
+    files: [mockDiffFor(f.path, staged)],
+    hunkActions: actions,
+  });
+}
+
+function openStashPushForm(){
+  openForm({
+    title: '暂存更改到 stash',
+    bodyNodes: null,
+    onOpen(api){
+      const item = el('div', 'f-item');
+      item.appendChild(el('label', '', 'Message'));
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'stash 说明（可选）';
+      item.appendChild(input);
+      api.body.appendChild(item);
+      const chkLabel = el('label', 'chk');
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chkLabel.appendChild(chk);
+      chkLabel.appendChild(document.createTextNode('包含未跟踪文件'));
+      api.body.appendChild(chkLabel);
+      api.input = input; api.chk = chk;
+    },
+    footButtons: [ {
+      text: '确认 stash', ref: 'ok',
+      onClick(api){
+        const msg = api.input.value.trim() || 'WIP: ' + new Date().toLocaleString();
+        state.stashes.unshift({ index: 0, subject: msg, time: '刚刚', untracked: api.chk.checked });
+        state.stashes.forEach((x, i) => x.index = i);
+        state.unstaged = []; state.untracked = [];
+        api.close();
+        toast('已创建 stash（工作区已清空）');
+        renderChanges();
+      },
+    } ],
+  });
+}
+
+/* ============================================================
+ * Tab 2 · 分支
+ * ============================================================ */
+function renderBranches(){
+  const page = panelApi.pages.branches;
+  page.innerHTML = '';
+  const scroll = el('div', 'gm-scroll');
+
+  /* 分支列表 */
+  const sec = el('div', 'gm-section');
+  const t1 = el('div', 'gm-sec-title', '分支（' + state.branches.length + '）');
+  t1.appendChild(el('span', 'spacer'));
+  const bNew = el('button', 'btn neutral sm', '＋ 新建分支');
+  bNew.addEventListener('click', openNewBranchForm);
+  t1.appendChild(bNew);
+  sec.appendChild(t1);
+  const list = el('div', 'flist card');
+  state.branches.forEach(br => {
+    const row = el('div', 'frow');
+    row.appendChild(el('span', '', br.current ? '●' : '○'));
+    row.appendChild(el('span', 'fname', br.name));
+    if (br.current) row.appendChild(el('span', 'branch-badge', '当前'));
+    row.appendChild(el('span', 'spacer'));
+    const btns = el('span', 'rowbtns');
+    if (!br.current){
+      const bSwitch = el('button', 'btn neutral sm', '切换');
+      bSwitch.addEventListener('click', () => {
+        state.branches.forEach(x => x.current = false);
+        br.current = true;
+        toast('已切换到 ' + br.name + '（demo）');
+        renderBranches();
+      });
+      const bRename = el('button', 'btn ghost sm', '重命名');
+      bRename.addEventListener('click', () => openRenameBranchForm(br));
+      const bDel = el('button', 'btn danger sm', '删除');
+      bDel.addEventListener('click', () => {
+        openConfirm({
+          title: '删除分支', danger: true, confirmText: '删除',
+          message: '删除分支 <b>' + esc(br.name) + '</b>？该操作不可恢复。',
+          onConfirm: () => {
+            state.branches = state.branches.filter(x => x !== br);
+            toast('已删除分支 ' + br.name);
+            renderBranches();
+          },
+        });
+      });
+      btns.appendChild(bSwitch); btns.appendChild(bRename); btns.appendChild(bDel);
+    }
+    row.appendChild(btns);
+    list.appendChild(row);
+  });
+  sec.appendChild(list);
+  scroll.appendChild(sec);
+
+  /* Tag 区 */
+  const sec2 = el('div', 'gm-section');
+  const t2 = el('div', 'gm-sec-title', 'Tag（' + state.tags.length + '）');
+  t2.appendChild(el('span', 'spacer'));
+  const bNewTag = el('button', 'btn neutral sm', '＋ 新建 tag…');
+  bNewTag.addEventListener('click', openNewTagForm);
+  t2.appendChild(bNewTag);
+  sec2.appendChild(t2);
+  const tlist = el('div', 'flist card');
+  if (!state.tags.length) tlist.appendChild(el('div', 'empty', '暂无 tag'));
+  state.tags.forEach(tg => {
+    const row = el('div', 'frow');
+    row.appendChild(el('span', '', '🏷'));
+    row.appendChild(el('span', 'fname', tg.name));
+    if (tg.annotated) row.appendChild(el('span', 'branch-badge', 'annotated'));
+    row.appendChild(el('span', 'meta', '→ ' + tg.target));
+    if (tg.pushed) row.appendChild(el('span', 'meta', '已推送'));
+    row.appendChild(el('span', 'spacer'));
+    const btns = el('span', 'rowbtns');
+    const bPush = el('button', 'btn neutral sm', 'push');
+    bPush.addEventListener('click', () => { tg.pushed = true; toast('已 push tag ' + tg.name + '（demo）'); renderBranches(); });
+    const bDel = el('button', 'btn danger sm', '删除');
+    bDel.addEventListener('click', () => {
+      openConfirm({
+        title: '删除 tag', danger: true, confirmText: '删除',
+        message: '删除 tag <b>' + esc(tg.name) + '</b>？' + (tg.pushed ? '该 tag 已推送，删除后需要手动同步远端。' : ''),
+        onConfirm: () => {
+          state.tags = state.tags.filter(x => x !== tg);
+          toast('已删除 tag ' + tg.name);
+          renderBranches();
+        },
+      });
+    });
+    btns.appendChild(bPush); btns.appendChild(bDel);
+    row.appendChild(btns);
+    tlist.appendChild(row);
+  });
+  sec2.appendChild(tlist);
+  scroll.appendChild(sec2);
+  page.appendChild(scroll);
+}
+
+function openNewBranchForm(){
+  openForm({
+    title: '新建分支',
+    onOpen(api){
+      const item = el('div', 'f-item');
+      item.appendChild(el('label', '', '分支名'));
+      const input = document.createElement('input');
+      input.type = 'text'; input.placeholder = '如 fix/typo';
+      item.appendChild(input);
+      api.body.appendChild(item);
+      const item2 = el('div', 'f-item');
+      item2.appendChild(el('label', '', '起点（默认 HEAD）'));
+      const input2 = document.createElement('input');
+      input2.type = 'text'; input2.placeholder = 'HEAD';
+      item2.appendChild(input2);
+      api.body.appendChild(item2);
+      api.input = input;
+    },
+    footButtons: [ {
+      text: '创建', ref: 'ok',
+      onClick(api){
+        const name = api.input.value.trim();
+        if (!name){ toast('请输入分支名'); return; }
+        if (state.branches.some(b => b.name === name)){ toast('分支已存在'); return; }
+        state.branches.push({ name, current: false });
+        api.close();
+        toast('已创建分支 ' + name);
+        renderBranches();
+      },
+    } ],
+  });
+}
+function openRenameBranchForm(br){
+  openForm({
+    title: '重命名分支',
+    onOpen(api){
+      const item = el('div', 'f-item');
+      item.appendChild(el('label', '', '新名称'));
+      const input = document.createElement('input');
+      input.type = 'text'; input.value = br.name;
+      item.appendChild(input);
+      api.body.appendChild(item);
+      api.input = input;
+    },
+    footButtons: [ {
+      text: '重命名', ref: 'ok',
+      onClick(api){
+        const name = api.input.value.trim();
+        if (!name || name === br.name){ api.close(); return; }
+        br.name = name;
+        api.close();
+        toast('已重命名为 ' + name);
+        renderBranches();
+      },
+    } ],
+  });
+}
+function openNewTagForm(){
+  openForm({
+    title: '新建 tag',
+    onOpen(api){
+      const mk = (labelText, ph) => {
+        const item = el('div', 'f-item');
+        item.appendChild(el('label', '', labelText));
+        const input = document.createElement('input');
+        input.type = 'text'; input.placeholder = ph || '';
+        item.appendChild(input);
+        api.body.appendChild(item);
+        return input;
+      };
+      api.name = mk('Name', '如 v1.1.0');
+      api.target = mk('Target', 'HEAD');
+      api.target.value = 'HEAD';
+      const item = el('div', 'f-item');
+      item.appendChild(el('label', '', 'Annotated message（留空则为轻量 tag）'));
+      const ta = document.createElement('textarea');
+      ta.placeholder = '多行备注…';
+      item.appendChild(ta);
+      api.body.appendChild(item);
+      api.msg = ta;
+      const chkLabel = el('label', 'chk');
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chkLabel.appendChild(chk);
+      chkLabel.appendChild(document.createTextNode('force（覆盖已存在的同名 tag）'));
+      api.body.appendChild(chkLabel);
+      api.force = chk;
+    },
+    footButtons: [ {
+      text: '创建 tag', ref: 'ok',
+      onClick(api){
+        const name = api.name.value.trim();
+        if (!name){ toast('请输入 tag 名'); return; }
+        if (state.tags.some(t => t.name === name) && !api.force.checked){ toast('tag 已存在，可勾选 force 覆盖'); return; }
+        state.tags = state.tags.filter(t => t.name !== name);
+        state.tags.push({ name, target: api.target.value.trim() || 'HEAD', annotated: !!api.msg.value.trim(), msg: api.msg.value, pushed: false });
+        api.close();
+        toast('已创建 tag ' + name);
+        renderBranches();
+      },
+    } ],
+  });
+}
+
+/* ============================================================
+ * Tab 3 · 历史
+ * ============================================================ */
+const GRAPH_PALETTE = ['var(--graph-1)', 'var(--graph-2)', 'var(--graph-3)', 'var(--graph-4)'];
+
+function renderHistory(){
+  const page = panelApi.pages.history;
+  page.innerHTML = '';
+
+  /* 过滤条 */
+  const fb = el('div', 'filterbar');
+  const selRef = document.createElement('select');
+  [ ['all','全部 ref'], ['current','当前分支'], ['branch','任意分支…'], ['tags','tags'] ].forEach(([v, t]) => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = t;
+    selRef.appendChild(o);
+  });
+  selRef.value = state.filters.ref;
+  selRef.addEventListener('change', () => { state.filters.ref = selRef.value; renderHistory(); });
+  fb.appendChild(selRef);
+  const mkInput = (ph, key, w) => {
+    const i = document.createElement('input');
+    i.placeholder = ph; i.value = state.filters[key];
+    if (w) i.style.width = w;
+    i.addEventListener('input', () => { state.filters[key] = i.value; });
+    i.addEventListener('keydown', (e) => { if (e.key === 'Enter') renderHistory(); });
+    fb.appendChild(i);
+  };
+  mkInput('路径…', 'path', '110px');
+  mkInput('作者…', 'author', '90px');
+  mkInput('grep…', 'grep', '90px');
+  mkInput('起始日期', 'since', '118px').classList.add('date');
+  mkInput('结束日期', 'until', '118px').classList.add('date');
+  const bClear = el('button', 'btn ghost sm', '清除过滤');
+  bClear.addEventListener('click', () => {
+    state.filters = { ref: 'all', path: '', author: '', grep: '', since: '', until: '' };
+    renderHistory();
+  });
+  fb.appendChild(bClear);
+  fb.appendChild(el('span', 'spacer'));
+  const seg = el('span', 'seg');
+  const bC = el('button', state.histMode === 'commits' ? 'on' : '', '提交');
+  const bR = el('button', state.histMode === 'reflog' ? 'on' : '', 'Reflog');
+  bC.addEventListener('click', () => { state.histMode = 'commits'; renderHistory(); });
+  bR.addEventListener('click', () => { state.histMode = 'reflog'; toast('Reflog 模式（demo 占位）'); });
+  seg.appendChild(bC); seg.appendChild(bR);
+  fb.appendChild(seg);
+  page.appendChild(fb);
+
+  /* 范围对比提示条 */
+  const cmp = state.compare;
+  const cmpBar = el('div', 'cmp-bar' + (cmp ? ' show' : ''));
+  if (cmp){
+    const lbl = el('span');
+    if (cmp.picking === 'base'){ lbl.innerHTML = '请选择<b>基准</b>提交…（点击左侧提交行）'; }
+    else if (cmp.picking === 'target'){ lbl.innerHTML = '基准 <b>' + esc(cmp.base.sha) + '</b> 已选，请选择<b>对比</b>提交…'; }
+    else { lbl.innerHTML = '对比：<b>' + esc(cmp.base.sha) + '</b> → <b>' + esc(cmp.target.sha) + '</b>'; }
+    cmpBar.appendChild(lbl);
+    cmpBar.appendChild(el('span', 'spacer'));
+    if (!cmp.picking){
+      const bStat = el('button', 'btn neutral sm', '查看 stat');
+      bStat.addEventListener('click', () => toast('stat：3 个文件，+64 −26（demo）'));
+      cmpBar.appendChild(bStat);
+    }
+    const bExit = el('button', 'btn danger sm', '退出对比');
+    bExit.addEventListener('click', () => { state.compare = null; renderHistory(); });
+    cmpBar.appendChild(bExit);
+  }
+  page.appendChild(cmpBar);
+
+  /* 主体：列表 + 详情侧栏 */
+  const wrap = el('div', 'hist-wrap');
+  const listEl = el('div', 'hist-list');
+
+  /* 简化分支线 SVG（3-4 条彩线 + 圆点，行高 32px） */
+  const ROW_H = 32, shown = state.commits.slice(0, state.commitsShown);
+  const laneOf = {};
+  shown.forEach((c, i) => { if (!(c.sha in laneOf)) laneOf[c.sha] = i % 4; });
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('width', '56');
+  svg.setAttribute('height', String(shown.length * ROW_H));
+  svg.style.flex = 'none';
+  shown.forEach((c, i) => {
+    const col = laneOf[c.sha];
+    /* 竖线 */
+    const next = shown[i + 1];
+    if (next){
+      const nCol = laneOf[next.sha];
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('x1', String(10 + col * 12)); line.setAttribute('y1', String(i * ROW_H + 16));
+      line.setAttribute('x2', String(10 + nCol * 12)); line.setAttribute('y2', String((i + 1) * ROW_H + 16));
+      line.setAttribute('stroke', GRAPH_PALETTE[col]);
+      line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('opacity', '0.45');
+      svg.appendChild(line);
+    }
+    /* merge 斜线 */
+    if (c.merge){
+      const l2 = document.createElementNS(svgNS, 'line');
+      l2.setAttribute('x1', String(10 + ((col + 2) % 4) * 12)); l2.setAttribute('y1', String(i * ROW_H + 16));
+      l2.setAttribute('x2', String(10 + col * 12)); l2.setAttribute('y2', String(i * ROW_H + 16));
+      l2.setAttribute('stroke', GRAPH_PALETTE[(col + 2) % 4]);
+      l2.setAttribute('stroke-width', '1.25');
+      l2.setAttribute('opacity', '0.7');
+      svg.appendChild(l2);
+    }
+    /* 圆点 */
+    const dot = document.createElementNS(svgNS, 'circle');
+    dot.setAttribute('cx', String(10 + col * 12));
+    dot.setAttribute('cy', String(i * ROW_H + 16));
+    dot.setAttribute('r', '4');
+    dot.setAttribute('fill', GRAPH_PALETTE[col]);
+    svg.appendChild(dot);
+  });
+
+  const listCol = el('div', '');
+  listCol.style.cssText = 'flex:1;min-width:0;display:flex;overflow:hidden';
+  listCol.appendChild(svg);
+  const rows = el('div', '');
+  rows.style.cssText = 'flex:1;min-width:0;padding:0 8px 0 0';
+  shown.forEach(c => {
+    const row = el('div', 'hist-row' + (state.selCommit === c ? ' sel' : ''));
+    row.appendChild(el('span', 'sha', c.sha));
+    const subj = el('span', 'subj');
+    subj.textContent = (c.merge ? '⇅ ' : '') + c.subject;
+    row.appendChild(subj);
+    row.appendChild(el('span', 'who', c.author));
+    row.appendChild(el('span', 'tm', c.time));
+    row.addEventListener('click', () => onCommitRowClick(c));
+    rows.appendChild(row);
+  });
+  const lm = el('div', 'loadmore');
+  const bMore = el('button', 'btn neutral sm', '加载更多');
+  bMore.addEventListener('click', () => {
+    state.commits.push(
+      { sha: 'aa11bb2', full: 'aa11bb2cc33dd44ee55ff66001122334455667788', subject: 'chore: 更早的提交 A', author: 'Ada', date: '2026-09-23', time: '5 天前', parents: [], merge: false, msg: 'chore: 更早的提交 A', files: [ { path: 'a.txt', s: 'M', add: 1, del: 1 } ] },
+      { sha: 'cc33dd4', full: 'cc33dd44ee55ff660011223344556677889900aa', subject: 'chore: 更早的提交 B', author: 'Duke', date: '2026-09-22', time: '6 天前', parents: [], merge: false, msg: 'chore: 更早的提交 B', files: [ { path: 'b.txt', s: 'A', add: 5, del: 0 } ] },
+    );
+    state.commitsShown += 2;
+    toast('已模拟 maxCount 放大整窗重取，追加 2 条提交');
+    renderHistory();
+  });
+  lm.appendChild(bMore);
+  rows.appendChild(lm);
+  listCol.appendChild(rows);
+  listEl.appendChild(listCol);
+  wrap.appendChild(listEl);
+
+  /* 详情侧栏 */
+  const c = state.selCommit;
+  const detail = el('div', 'hist-detail');
+  if (!c){
+    detail.innerHTML = '<div class="hd-body"><div class="empty" style="margin-top:40px">点击左侧提交查看详情</div></div>';
+  } else {
+    const hd = el('div', 'hd-head');
+    hd.appendChild(el('span', 'sha', c.sha));
+    hd.appendChild(el('span', '', c.subject));
+    const x = el('button', 'x'); x.textContent = '✕'; x.title = '关闭详情';
+    x.addEventListener('click', () => { state.selCommit = null; renderHistory(); });
+    hd.appendChild(x);
+    detail.appendChild(hd);
+    const bd = el('div', 'hd-body');
+    const kv1 = el('div', 'kv'); kv1.innerHTML = '<span class="k">完整 SHA</span><span>' + esc(c.full) + '</span>';
+    const kv2 = el('div', 'kv'); kv2.innerHTML = '<span class="k">作者</span><span>' + esc(c.author) + '</span>';
+    const kv3 = el('div', 'kv'); kv3.innerHTML = '<span class="k">日期</span><span>' + esc(c.date) + '（' + esc(c.time) + '）</span>';
+    bd.appendChild(kv1); bd.appendChild(kv2); bd.appendChild(kv3);
+    if (c.merge) bd.appendChild(el('div', 'meta', '⇅ Merge commit，双亲：' + c.parents.join('、')));
+    bd.appendChild(el('div', 'hd-msg', c.msg));
+    bd.appendChild(el('div', 'gm-sec-title', '变更文件（' + c.files.length + '）'));
+    c.files.forEach(f => {
+      const fr = el('div', 'hfile');
+      fr.appendChild(el('span', 'st st-' + f.s, f.s));
+      fr.appendChild(el('span', 'fname', f.path));
+      fr.appendChild(el('span', 'meta', '+' + f.add + ' −' + f.del));
+      fr.appendChild(el('span', 'spacer'));
+      const btns = el('span', 'rowbtns');
+      const bDiff = el('button', 'btn neutral sm', '看 diff');
+      bDiff.addEventListener('click', () => {
+        openDiffWindow({
+          title: f.path, tag: '只读 · ' + c.sha,
+          files: [mockDiffFor(f.path, true)], hunkActions: null,
+        });
+      });
+      const bBlame = el('button', 'btn ghost sm', 'Blame');
+      bBlame.addEventListener('click', () => toast('Blame 视图（demo 占位）'));
+      btns.appendChild(bDiff); btns.appendChild(bBlame);
+      fr.appendChild(btns);
+      bd.appendChild(fr);
+    });
+    detail.appendChild(bd);
+    const foot = el('div', 'hd-foot');
+    const bRevert = el('button', 'btn neutral', 'Revert 此提交');
+    bRevert.addEventListener('click', () => toast('已 revert ' + c.sha + '（demo）'));
+    const bCompare = el('button', 'btn neutral', '对比基准');
+    bCompare.addEventListener('click', () => {
+      state.compare = { base: null, target: null, picking: 'base' };
+      toast('已进入范围对比模式：请选择基准提交');
+      renderHistory();
+    });
+    const bReset = el('button', 'btn danger', 'Reset 当前分支到此提交…');
+    bReset.addEventListener('click', () => openResetForm(c));
+    foot.appendChild(bRevert); foot.appendChild(bCompare); foot.appendChild(bReset);
+    detail.appendChild(foot);
+  }
+  wrap.appendChild(detail);
+  page.appendChild(wrap);
+}
+
+function onCommitRowClick(c){
+  const cmp = state.compare;
+  if (cmp && cmp.picking){
+    if (cmp.picking === 'base'){ cmp.base = c; cmp.picking = 'target'; }
+    else if (cmp.picking === 'target'){
+      if (cmp.base === c){ toast('基准与对比不能是同一提交'); return; }
+      cmp.target = c; cmp.picking = null;
+    }
+    state.selCommit = c;
+    renderHistory();
+    return;
+  }
+  state.selCommit = (state.selCommit === c) ? null : c;
+  renderHistory();
+}
+
+function openResetForm(c){
+  let mode = 'mixed';
+  openForm({
+    title: 'Reset 当前分支到 ' + c.sha,
+    onOpen(api){
+      const warn = el('div', 'warn-line');
+      warn.innerHTML = '<span>⚠️</span><span>Reset 会移动分支指针。hard 模式会丢弃工作区与暂存区的改动，请谨慎操作。</span>';
+      api.body.appendChild(warn);
+      const modes = [ ['soft','soft — 只移动 HEAD，暂存区与工作区不变'], ['mixed','mixed — 移动 HEAD 并重置暂存区（默认）'], ['hard','hard — 同时丢弃工作区改动'] ];
+      const radios = [];
+      modes.forEach(([v, labelText]) => {
+        const lab = el('label', 'chk');
+        lab.style.cssText = 'display:flex;padding:5px 0';
+        const r = document.createElement('input');
+        r.type = 'radio'; r.name = 'reset-mode'; r.value = v;
+        r.checked = v === mode;
+        r.addEventListener('change', () => {
+          mode = v;
+          confirmInput.style.display = (mode === 'hard') ? '' : 'none';
+          api.ok.disabled = (mode === 'hard');
+          if (mode === 'hard') confirmInput.value = '';
+        });
+        radios.push(r);
+        lab.appendChild(r);
+        lab.appendChild(document.createTextNode(labelText));
+        api.body.appendChild(lab);
+      });
+      const item = el('div', 'f-item');
+      item.style.display = 'none';
+      item.appendChild(el('label', '', '输入 RESET 以确认'));
+      const confirmInput = document.createElement('input');
+      confirmInput.type = 'text';
+      confirmInput.placeholder = 'RESET';
+      confirmInput.addEventListener('input', () => {
+        api.ok.disabled = !(mode === 'hard' && confirmInput.value === 'RESET');
+      });
+      item.appendChild(confirmInput);
+      api.body.appendChild(item);
+      api.confirmInput = confirmInput;
+    },
+    footButtons: [ {
+      text: '确认 Reset', ref: 'ok',
+      onClick(api){
+        api.close();
+        toast('已执行 git reset --' + mode + ' ' + c.sha + '（demo）');
+      },
+    } ],
+  });
+}
+
+/* ============================================================
+ * Tab 4 · 冲突
+ * ============================================================ */
+function renderConflicts(){
+  const page = panelApi.pages.conflicts;
+  page.innerHTML = '';
+  const scroll = el('div', 'gm-scroll');
+
+  /* 模拟开关 */
+  const sw = el('div', 'toolbar');
+  sw.appendChild(el('span', 'meta', 'demo 切换：'));
+  const lab = el('label', 'chk');
+  const chk = document.createElement('input');
+  chk.type = 'checkbox';
+  chk.checked = state.conflictStash;
+  chk.addEventListener('change', () => {
+    state.conflictStash = chk.checked;
+    state.conflictChoice = null;
+    renderConflicts();
+  });
+  lab.appendChild(chk);
+  lab.appendChild(document.createTextNode('模拟 stash 冲突'));
+  sw.appendChild(lab);
+  scroll.appendChild(sw);
+
+  if (!state.conflictStash){
+    /* 普通合并冲突 */
+    const bar = el('div', 'conflict-file-bar');
+    bar.appendChild(el('span', 'st st-U', 'U'));
+    bar.appendChild(el('span', 'fname', 'src/app.js'));
+    bar.appendChild(el('span', 'meta', '2 处冲突标记'));
+    scroll.appendChild(bar);
+    scroll.appendChild(conflictGrid());
+    const btns = el('div', 'toolbar');
+    const bCont = el('button', 'btn primary', '继续');
+    bCont.addEventListener('click', () => toast('已继续操作（git commit --no-edit，demo）'));
+    const bAbort = el('button', 'btn danger', '中止操作');
+    bAbort.addEventListener('click', () => {
+      openConfirm({
+        title: '中止合并', danger: true, confirmText: '中止',
+        message: '中止当前合并并恢复到合并前状态？',
+        onConfirm: () => toast('已中止合并（demo）'),
+      });
+    });
+    btns.appendChild(bCont); btns.appendChild(bAbort);
+    scroll.appendChild(btns);
+  } else {
+    /* stash 冲突态 */
+    const notice = el('div', 'notice warn');
+    notice.innerHTML = '<span>ⓘ</span><span>stash 应用冲突：解决并暂存后删除 stash 条目，或中止（丢弃未解决的冲突文件改动，stash 保留）。</span>';
+    scroll.appendChild(notice);
+    const bar = el('div', 'conflict-file-bar');
+    bar.appendChild(el('span', 'st st-U', 'U'));
+    bar.appendChild(el('span', 'fname', 'src/app.js'));
+    bar.appendChild(el('span', 'meta', 'stash@{' + (state.stashes[0] ? state.stashes[0].index : 0) + '} 应用冲突'));
+    scroll.appendChild(bar);
+    scroll.appendChild(conflictGrid());
+    const btns = el('div', 'toolbar');
+    const bDel = el('button', 'btn primary', '删除 stash 条目');
+    bDel.addEventListener('click', () => {
+      openConfirm({
+        title: '删除 stash 条目', danger: true, confirmText: '删除',
+        message: '冲突已解决并暂存？删除对应 stash 条目后无法再次应用。',
+        onConfirm: () => {
+          if (state.stashes.length) state.stashes.shift();
+          state.conflictStash = false;
+          toast('已删除 stash 条目（demo）');
+          renderConflicts();
+        },
+      });
+    });
+    const bAbort = el('button', 'btn danger', '中止');
+    bAbort.addEventListener('click', () => {
+      openConfirm({
+        title: '中止 stash 应用', danger: true, confirmText: '中止',
+        message: '丢弃未解决的冲突文件改动，stash 条目保留。确定继续吗？',
+        onConfirm: () => {
+          state.conflictStash = false;
+          state.conflictChoice = null;
+          toast('已中止，stash 保留（demo）');
+          renderConflicts();
+        },
+      });
+    });
+    btns.appendChild(bDel); btns.appendChild(bAbort);
+    scroll.appendChild(btns);
+  }
+  page.appendChild(scroll);
+}
+
+function conflictGrid(){
+  const grid = el('div', 'conflict-grid');
+  const ours = el('div', 'conflict-pane' + (state.conflictChoice === 'left' ? ' picked-l' : ''));
+  ours.appendChild(el('div', 'cp-head', 'ours（当前分支 main）'));
+  const preL = document.createElement('pre');
+  preL.textContent = 'function greet() {\n<<<<<<< HEAD\n  return "hello v2";\n=======\n  return "hello from feature";\n>>>>>>> feature/x\n}';
+  ours.appendChild(preL);
+  const theirs = el('div', 'conflict-pane' + (state.conflictChoice === 'right' ? ' picked-r' : ''));
+  theirs.appendChild(el('div', 'cp-head', 'theirs（feature/x）'));
+  const preR = document.createElement('pre');
+  preR.textContent = 'function greet() {\n  return "hello from feature";\n}';
+  theirs.appendChild(preR);
+  grid.appendChild(ours); grid.appendChild(theirs);
+
+  const ops = el('div', 'toolbar');
+  const bL = el('button', 'btn neutral sm', '采用左');
+  bL.addEventListener('click', () => { state.conflictChoice = 'left'; toast('已采用 ours（demo）'); renderConflicts(); });
+  const bR = el('button', 'btn neutral sm', '采用右');
+  bR.addEventListener('click', () => { state.conflictChoice = 'right'; toast('已采用 theirs（demo）'); renderConflicts(); });
+  const bE = el('button', 'btn ghost sm', '编辑');
+  bE.addEventListener('click', () => toast('打开冲突编辑器（demo 占位）'));
+  ops.appendChild(bL); ops.appendChild(bR); ops.appendChild(bE);
+  grid.appendChild(ops);
+  const wrap = el('div');
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+/* ============================================================
+ * Tab 5 · Worktree
+ * ============================================================ */
+function renderWorktree(){
+  const page = panelApi.pages.worktree;
+  page.innerHTML = '';
+  const scroll = el('div', 'gm-scroll');
+  const notice = el('div', 'notice');
+  notice.innerHTML = '<span>ⓘ</span><span>新 Worktree 会自动注册为 DSH 工作区。</span>';
+  scroll.appendChild(notice);
+
+  const t = el('div', 'gm-sec-title', 'Worktree（' + state.worktrees.length + '）');
+  t.appendChild(el('span', 'spacer'));
+  const bAdd = el('button', 'btn neutral sm', '＋ 添加 Worktree…');
+  bAdd.addEventListener('click', openAddWorktreeForm);
+  t.appendChild(bAdd);
+  scroll.appendChild(t);
+
+  const list = el('div', 'flist card');
+  state.worktrees.forEach(wt => {
+    const row = el('div', 'frow');
+    row.appendChild(el('span', '', '🌲'));
+    const info = el('div', '');
+    info.style.cssText = 'display:flex;flex-direction:column;min-width:0';
+    info.appendChild(el('span', 'fname', wt.path));
+    const meta = el('span', 'meta', wt.branch + ' · HEAD ' + wt.head);
+    info.appendChild(meta);
+    row.appendChild(info);
+    row.appendChild(el('span', 'spacer'));
+    const btns = el('span', 'rowbtns');
+    const bDel = el('button', 'btn danger sm', '删除');
+    bDel.addEventListener('click', () => {
+      openConfirm({
+        title: '删除 Worktree', danger: true, confirmText: '删除',
+        message: '删除 worktree <b>' + esc(wt.path) + '</b>（分支 ' + esc(wt.branch) + '）？该操作不可恢复。',
+        onConfirm: () => {
+          state.worktrees = state.worktrees.filter(x => x !== wt);
+          toast('已删除 worktree ' + wt.path);
+          renderWorktree();
+        },
+      });
+    });
+    btns.appendChild(bDel);
+    row.appendChild(btns);
+    list.appendChild(row);
+  });
+  scroll.appendChild(list);
+  page.appendChild(scroll);
+}
+
+function openAddWorktreeForm(){
+  openForm({
+    title: '添加 Worktree',
+    onOpen(api){
+      const mk = (labelText, ph) => {
+        const item = el('div', 'f-item');
+        item.appendChild(el('label', '', labelText));
+        const input = document.createElement('input');
+        input.type = 'text'; input.placeholder = ph;
+        item.appendChild(input);
+        api.body.appendChild(item);
+        return input;
+      };
+      api.path = mk('路径', '如 D:/repo-wt-new');
+      api.branch = mk('新分支名', '如 fix/new');
+      api.start = mk('起点（默认 HEAD）', 'HEAD');
+    },
+    footButtons: [ {
+      text: '创建', ref: 'ok',
+      onClick(api){
+        const p = api.path.value.trim(), b = api.branch.value.trim();
+        if (!p || !b){ toast('请填写路径与分支名'); return; }
+        state.worktrees.push({ path: p, branch: b, head: '0000000' });
+        api.close();
+        toast('已创建 worktree 并注册为 DSH 工作区（demo）');
+        renderWorktree();
+      },
+    } ],
+  });
+}
+
+/* ============================================================
+ * Tab 6 · 设置
+ * ============================================================ */
+function renderSettings(){
+  const page = panelApi.pages.settings;
+  page.innerHTML = '';
+  const scroll = el('div', 'gm-scroll');
+
+  /* Remote 区 */
+  const t1 = el('div', 'gm-sec-title', 'Remote（' + state.remotes.length + '）');
+  t1.appendChild(el('span', 'spacer'));
+  const bAdd = el('button', 'btn neutral sm', '＋ 添加 remote');
+  bAdd.addEventListener('click', openAddRemoteForm);
+  t1.appendChild(bAdd);
+  scroll.appendChild(t1);
+  const rlist = el('div', 'card');
+  state.remotes.forEach(rm => {
+    const row = el('div', 'frow');
+    row.appendChild(el('span', '', '🔗'));
+    const info = el('div', '');
+    info.style.cssText = 'display:flex;flex-direction:column;min-width:0';
+    info.appendChild(el('span', 'fname', rm.name));
+    info.appendChild(el('span', 'meta', 'fetch: ' + rm.fetch));
+    info.appendChild(el('span', 'meta', 'push:  ' + rm.push));
+    row.appendChild(info);
+    row.appendChild(el('span', 'spacer'));
+    const btns = el('span', 'rowbtns');
+    const bRename = el('button', 'btn ghost sm', '重命名');
+    bRename.addEventListener('click', () => {
+      openForm({
+        title: '重命名 remote',
+        onOpen(api){
+          const item = el('div', 'f-item');
+          item.appendChild(el('label', '', '新名称'));
+          const input = document.createElement('input');
+          input.type = 'text'; input.value = rm.name;
+          item.appendChild(input);
+          api.body.appendChild(item);
+          api.input = input;
+        },
+        footButtons: [ {
+          text: '重命名', ref: 'ok',
+          onClick(api){
+            const n = api.input.value.trim();
+            if (n){ rm.name = n; toast('已重命名为 ' + n); }
+            api.close();
+            renderSettings();
+          },
+        } ],
+      });
+    });
+    const bDel = el('button', 'btn danger sm', '删除');
+    bDel.addEventListener('click', () => {
+      openConfirm({
+        title: '删除 remote', danger: true, confirmText: '删除',
+        message: '删除 remote <b>' + esc(rm.name) + '</b>？',
+        onConfirm: () => {
+          state.remotes = state.remotes.filter(x => x !== rm);
+          toast('已删除 remote ' + rm.name);
+          renderSettings();
+        },
+      });
+    });
+    btns.appendChild(bRename); btns.appendChild(bDel);
+    row.appendChild(btns);
+    rlist.appendChild(row);
+  });
+  scroll.appendChild(rlist);
+
+  /* Config 区 */
+  scroll.appendChild(el('div', 'gm-sec-title', 'Config'));
+  const seg = el('span', 'seg');
+  const bL = el('button', state.cfgScope === 'local' ? 'on' : '', 'local');
+  const bG = el('button', state.cfgScope === 'global' ? 'on' : '', 'global');
+  bL.addEventListener('click', () => { state.cfgScope = 'local'; renderSettings(); });
+  bG.addEventListener('click', () => { state.cfgScope = 'global'; renderSettings(); });
+  seg.appendChild(bL); seg.appendChild(bG);
+  scroll.appendChild(seg);
+
+  const tbl = document.createElement('table');
+  tbl.className = 'cfg-table card';
+  state.cfg[state.cfgScope].forEach(item => {
+    const tr = document.createElement('tr');
+    const tdK = document.createElement('td');
+    tdK.className = 'k';
+    tdK.textContent = item.k;
+    const tdV = document.createElement('td');
+    tdV.className = 'v';
+    const btns = el('span', 'rowbtns');
+    const bEdit = el('button', 'btn ghost sm', '编辑');
+    bEdit.addEventListener('click', () => {
+      tdV.innerHTML = '';
+      const wrap = el('div', 'cfg-edit');
+      const input = document.createElement('input');
+      input.value = item.v;
+      const bSave = el('button', 'btn neutral sm', '保存');
+      const bCancel = el('button', 'btn ghost sm', '取消');
+      const done = () => { renderSettings(); };
+      bSave.addEventListener('click', () => { item.v = input.value; toast('已保存 ' + item.k); done(); });
+      bCancel.addEventListener('click', done);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter'){ item.v = input.value; toast('已保存 ' + item.k); done(); } });
+      wrap.appendChild(input); wrap.appendChild(bSave); wrap.appendChild(bCancel);
+      tdV.appendChild(wrap);
+      input.focus();
+    });
+    const bDel = el('button', 'btn danger sm', '删除');
+    bDel.addEventListener('click', () => {
+      openConfirm({
+        title: '删除配置项', danger: true, confirmText: '删除',
+        message: '删除 <b>' + esc(item.k) + '</b>（' + state.cfgScope + '）？',
+        onConfirm: () => {
+          state.cfg[state.cfgScope] = state.cfg[state.cfgScope].filter(x => x !== item);
+          toast('已删除 ' + item.k);
+          renderSettings();
+        },
+      });
+    });
+    btns.appendChild(bEdit); btns.appendChild(bDel);
+    tdV.textContent = item.v;
+    tdV.appendChild(btns);
+    tr.appendChild(tdK); tr.appendChild(tdV);
+    tbl.appendChild(tr);
+  });
+  /* 添加行 */
+  const trAdd = document.createElement('tr');
+  const tdAdd = document.createElement('td');
+  tdAdd.colSpan = 2;
+  const bAddCfg = el('button', 'btn neutral sm', '＋ 添加配置项');
+  bAddCfg.addEventListener('click', () => {
+    openForm({
+      title: '添加配置项（' + state.cfgScope + '）',
+      onOpen(api){
+        const mk = (labelText) => {
+          const item = el('div', 'f-item');
+          item.appendChild(el('label', '', labelText));
+          const input = document.createElement('input');
+          input.type = 'text';
+          item.appendChild(input);
+          api.body.appendChild(item);
+          return input;
+        };
+        api.k = mk('Key（如 user.name）');
+        api.v = mk('Value');
+      },
+      footButtons: [ {
+        text: '添加', ref: 'ok',
+        onClick(api){
+          const k = api.k.value.trim(), v = api.v.value;
+          if (!k){ toast('请输入 key'); return; }
+          state.cfg[state.cfgScope].push({ k, v });
+          api.close();
+          toast('已添加 ' + k);
+          renderSettings();
+        },
+      } ],
+    });
+  });
+  tdAdd.appendChild(bAddCfg);
+  trAdd.appendChild(tdAdd);
+  tbl.appendChild(trAdd);
+  scroll.appendChild(tbl);
+  page.appendChild(scroll);
+}
+
+function openAddRemoteForm(){
+  openForm({
+    title: '添加 remote',
+    onOpen(api){
+      const mk = (labelText, ph) => {
+        const item = el('div', 'f-item');
+        item.appendChild(el('label', '', labelText));
+        const input = document.createElement('input');
+        input.type = 'text'; input.placeholder = ph;
+        item.appendChild(input);
+        api.body.appendChild(item);
+        return input;
+      };
+      api.name = mk('名称', 'origin');
+      api.url = mk('URL', 'https://…');
+    },
+    footButtons: [ {
+      text: '添加', ref: 'ok',
+      onClick(api){
+        const n = api.name.value.trim(), u = api.url.value.trim();
+        if (!n || !u){ toast('请填写名称与 URL'); return; }
+        state.remotes.push({ name: n, fetch: u, push: u });
+        api.close();
+        toast('已添加 remote ' + n);
+        renderSettings();
+      },
+    } ],
+  });
+}
+
+/* ============================================================
+ * 页面级：主题切换 / 入口按钮 / 演示说明卡片
+ * ============================================================ */
+const themeBtn = document.getElementById('themeBtn');
+function applyTheme(){
+  const dark = state.theme === 'dark';
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  themeBtn.textContent = dark ? '☀️ 亮色' : '🌙 暗色';
+}
+themeBtn.addEventListener('click', () => {
+  state.theme = state.theme === 'dark' ? 'light' : 'dark';
+  applyTheme();
+});
+applyTheme();
+
+document.getElementById('openPanelBtn').addEventListener('click', openPanel);
+
+const dn = document.getElementById('demoNote');
+document.getElementById('dnHead').addEventListener('click', () => dn.classList.toggle('open'));
+</script>
+</body>
+</html>

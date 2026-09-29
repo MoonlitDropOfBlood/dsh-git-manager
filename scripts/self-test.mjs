@@ -415,7 +415,19 @@ test("parseLogText: 多 parent 合并提交 + refs", () => {
   eq("c0 parents", commits[0].parents.length, 2);
   eq("c0 refs", commits[0].refs, refs);
   eq("c0 subject", commits[0].subject, "merge branches");
+  eq("c0 body 无正文挂空串", commits[0].body, "");
   eq("c1 parents", commits[1].parents, []);
+});
+
+test("parseLogText: body 多行正文（amend 预填用，尾随换行剥掉）", () => {
+  const fixture =
+    "abc\x1fabc\x1f\x1fAlice\x1fa@e\x1f1700000000\x1f\x1fsubject line\x1fbody para1\nbody para2\n\0" +
+    "def\x1fdef\x1f\x1fBob\x1fb@e\x1f1699999999\x1f\x1fsingle\x1f\0";
+  const commits = core.parseLogText(fixture);
+  eq("count", commits.length, 2);
+  eq("多行 body 保留内部换行", commits[0].body, "body para1\nbody para2");
+  eq("无 body 挂空串", commits[1].body, "");
+  eq("subject 照常", commits[0].subject, "subject line");
 });
 
 test("getBranches/getRemotes: live 仓库", async () => {
@@ -1173,6 +1185,1106 @@ live("cherryPick: 干净拣选 + 冲突后 abort / continue 全链路", async (t
 });
 
 // ============================================================================
+// v2（§2.2/§2.3）解析器 fixture：parseStashList / parseTagList / parseBlame /
+// parseReflog / parseConfigList + 入参白名单校验
+// ============================================================================
+
+test("parseStashList: 多条 + 字段映射", () => {
+  const fixture =
+    "stash@{0}\x1fOn main: stash msg one\x1f1700000000\x00" +
+    "stash@{1}\x1fWIP on feature: abc1234 add x\x1f1699999999\x00";
+  const r = core.parseStashList(fixture);
+  eq("count", r.length, 2);
+  eq("index0", r[0].index, 0);
+  eq("ref0", r[0].ref, "stash@{0}");
+  eq("subject0", r[0].subject, "On main: stash msg one");
+  eq("at0", r[0].at, 1700000000);
+  eq("index1", r[1].index, 1);
+  eq("subject1", r[1].subject, "WIP on feature: abc1234 add x");
+  eq("empty", core.parseStashList(""), []);
+});
+
+test("parseTagList: lightweight + annotated（%00 分组、contents 可多行）", () => {
+  // 与 git for-each-ref --format=<TAG_FMT> 实测形态一致：字段 \0 分隔、
+  // 条目以换行收尾（换行前缀落在下一条 name chunk 上）
+  const shaA = "a".repeat(40);
+  const shaB = "b".repeat(40);
+  const fixture =
+    "light\x00" + shaA + "\x00commit\x00\x001700000000\x00first commit\x00first commit\n\x00\n" +
+    "v1.0\x00" + shaB + "\x00tag\x00" + shaA + "\x001700000100\x00annotated msg second line\x00annotated msg\nsecond line\n\x00\n";
+  const r = core.parseTagList(fixture);
+  eq("count", r.length, 2);
+  eq("light name", r[0].name, "light");
+  eq("light sha（commit）", r[0].sha, shaA);
+  eq("light short", r[0].short, "aaaaaaa");
+  eq("light annotated", r[0].annotated, false);
+  check("light 无 message key", !("message" in r[0]));
+  eq("light subject", r[0].subject, "first commit");
+  eq("v1.0 name", r[1].name, "v1.0");
+  eq("v1.0 sha（解引用到 commit）", r[1].sha, shaA);
+  eq("v1.0 annotated", r[1].annotated, true);
+  eq("v1.0 message 多行保留", r[1].message, "annotated msg\nsecond line");
+  eq("v1.0 at", r[1].at, 1700000100);
+  eq("empty", core.parseTagList(""), []);
+});
+
+test("parseBlame: 组头 + 组内续行 + boundary（元数据沿用组）", () => {
+  const sha1 = "c".repeat(40);
+  const sha2 = "d".repeat(40);
+  const fixture = [
+    sha1 + " 1 1 2",
+    "author Alice",
+    "author-mail <a@e>",
+    "author-time 1700000000",
+    "summary second commit",
+    "filename f.txt",
+    "\tl1x",
+    sha1 + " 2 2",
+    "\tl2",
+    sha2 + " 3 3 1",
+    "author Bob",
+    "author-time 1699999999",
+    "summary first commit",
+    "boundary",
+    "filename f.txt",
+    "\tl3",
+  ].join("\n") + "\n";
+  const r = core.parseBlame(fixture);
+  eq("count", r.length, 3);
+  eq("line0 sha", r[0].sha, sha1);
+  eq("line0 short", r[0].short, "ccccccc");
+  eq("line0 author", r[0].author, "Alice");
+  eq("line0 at", r[0].at, 1700000000);
+  eq("line0 line#", r[0].line, 1);
+  eq("line0 text", r[0].text, "l1x");
+  eq("续行沿用组元数据", r[1].author, "Alice");
+  eq("续行 line#", r[1].line, 2);
+  eq("line2 author", r[2].author, "Bob");
+  eq("line2 text", r[2].text, "l3");
+  eq("empty", core.parseBlame(""), []);
+});
+
+test("parseReflog: 字段映射", () => {
+  const fixture =
+    "abcdef0123456789abcdef0123456789abcdef01\x1fabcdef0\x1fHEAD@{0}\x1freset: moving to HEAD\x1f1700000000\x00" +
+    "1111111111111111111111111111111111111111\x1f1111111\x1fHEAD@{1}\x1fcommit: init\x1f1699999999\x00";
+  const r = core.parseReflog(fixture);
+  eq("count", r.length, 2);
+  eq("selector", r[0].selector, "HEAD@{0}");
+  eq("message", r[0].message, "reset: moving to HEAD");
+  eq("short", r[0].short, "abcdef0");
+  eq("at", r[0].at, 1700000000);
+  eq("empty", core.parseReflog(""), []);
+});
+
+test("parseConfigList: key\\nvalue + NUL 分隔 + value 含换行", () => {
+  const fixture = "user.name\nT\x00user.email\nt@e.com\x00core.multi\nline1\nline2\x00";
+  const r = core.parseConfigList(fixture);
+  eq("count", r.length, 3);
+  eq("key0", r[0], { key: "user.name", value: "T" });
+  eq("value 含换行取第一个 \\n 后全部", r[2], { key: "core.multi", value: "line1\nline2" });
+  eq("empty", core.parseConfigList(""), []);
+});
+
+test("白名单校验：checkRev / checkResetTarget / checkRefName / checkStashIndex", () => {
+  // checkRev：合法形态放行，"-" 开头 / 空白 / 元字符拒绝
+  eq("HEAD~1", core.checkRev("HEAD~1", "t"), "HEAD~1");
+  eq("sha", core.checkRev("abc123f", "t"), "abc123f");
+  eq("branch", core.checkRev("feature/x", "t"), "feature/x");
+  for (const evil of ["-x", "--upload-pack=evil", "a b", "a;b", "a|b", ""]) {
+    let caught;
+    try { core.checkRev(evil, "t"); } catch (e) { caught = e; }
+    check("checkRev 拒绝 " + JSON.stringify(evil), caught instanceof core.GitError);
+  }
+  // checkResetTarget：sha / HEAD / HEAD~n / @{...} 白名单
+  eq("target 缺省 HEAD", core.checkResetTarget(null), "HEAD");
+  eq("target HEAD", core.checkResetTarget("HEAD"), "HEAD");
+  eq("target HEAD~3", core.checkResetTarget("HEAD~3"), "HEAD~3");
+  eq("target @{0}", core.checkResetTarget("@{0}"), "@{0}");
+  eq("target @{upstream}", core.checkResetTarget("@{upstream}"), "@{upstream}");
+  for (const evil of ["--soft", "HEAD@{yesterday}", "main", "HEAD~x", "a b", "HEAD;x"]) {
+    let caught;
+    try { core.checkResetTarget(evil); } catch (e) { caught = e; }
+    check("checkResetTarget 拒绝 " + JSON.stringify(evil), caught instanceof core.GitError);
+  }
+  // checkRefName
+  eq("v1.0", core.checkRefName("v1.0", "t"), "v1.0");
+  for (const evil of ["-f", "a..b", "a b", "a//b", "x@{1}", "a.lock", "end."]) {
+    let caught;
+    try { core.checkRefName(evil, "t"); } catch (e) { caught = e; }
+    check("checkRefName 拒绝 " + JSON.stringify(evil), caught instanceof core.GitError);
+  }
+  // checkStashIndex
+  eq("缺省 0", core.checkStashIndex(null), 0);
+  eq("数字", core.checkStashIndex(3), 3);
+  for (const evil of [-1, 1.5, "x", 10000]) {
+    let caught;
+    try { core.checkStashIndex(evil); } catch (e) { caught = e; }
+    check("checkStashIndex 拒绝 " + JSON.stringify(evil), caught instanceof core.GitError);
+  }
+});
+
+// ============================================================================
+// v2 live：stageHunk / stash 全家 / tag 全家 / reset / revert / blame /
+// diffRange / reflog / log 过滤 / push refSpec / remote / config
+// ============================================================================
+
+live("stageHunkFile: 只暂存指定块（status + staged diff 校验）", async (tmp) => {
+  const lines = [];
+  for (let i = 1; i <= 20; i++) lines.push("line" + i);
+  await writeFile(join(tmp, "multi.txt"), lines.join("\n") + "\n");
+  await runShell(tmp, ["git", "add", "multi.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "multi"]);
+  lines[1] = "line2-changed";
+  lines[17] = "line18-changed";
+  await writeFile(join(tmp, "multi.txt"), lines.join("\n") + "\n");
+
+  const st = await core.stageHunkFile(tmp, { file: "multi.txt", hunkIndex: 0 });
+  check("multi.txt 进入 staged", st.staged.some((e) => e.path === "multi.txt"));
+  check("multi.txt 仍在 unstaged（第 1 块未暂存）", st.unstaged.some((e) => e.path === "multi.txt"));
+  const sd = await core.getDiff(tmp, { scope: "staged", file: "multi.txt" });
+  check("staged diff 含 line2-changed", sd.text.includes("line2-changed"));
+  check("staged diff 不含 line18-changed", !sd.text.includes("line18-changed"));
+  const content = (await readFile(join(tmp, "multi.txt"), "utf8")).replace(/\r\n/g, "\n");
+  check("工作区文件内容未被改动", content.includes("line2-changed") && content.includes("line18-changed"));
+  wireCheck("stageHunk", { status: st });
+
+  let caught;
+  try { await core.stageHunkFile(tmp, { file: "../escape.txt", hunkIndex: 0 }); } catch (e) { caught = e; }
+  check("越界 file 抛 GitError", caught instanceof core.GitError);
+});
+
+live("stash 全家: push/list/apply/pop/drop/clear", async (tmp) => {
+  await writeFile(join(tmp, "README.md"), "# init\nchanged\n");
+  await writeFile(join(tmp, "s1.txt"), "one\n");
+
+  const pushed = await core.stashPush(tmp, "my stash", true);
+  eq("push 后 1 条", pushed.stashes.length, 1);
+  check("subject 含 message", pushed.stashes[0].subject.includes("my stash"));
+  eq("stashEntry index", pushed.stashes[0].index, 0);
+  check("stashEntry at 是时间戳", pushed.stashes[0].at > 0);
+  wireCheck("stashPush", pushed);
+  const stAfterPush = await core.getStatus(tmp);
+  eq("push 后工作区干净", stAfterPush.staged.length + stAfterPush.unstaged.length + stAfterPush.untracked.length, 0);
+
+  const list = await core.getStashes(tmp);
+  eq("stashList 1 条", list.stashes.length, 1);
+  wireCheck("stashList", list);
+
+  const applied = await core.stashApply(tmp, 0);
+  check("apply 恢复修改", applied.unstaged.some((e) => e.path === "README.md"));
+  check("apply 恢复未跟踪", applied.untracked.includes("s1.txt"));
+  eq("apply 不消耗 stash 条目", (await core.getStashes(tmp)).stashes.length, 1);
+  wireCheck("stashApply", { status: applied });
+
+  await core.discardFiles(tmp, ["README.md", "s1.txt"], true);
+  const popped = await core.stashPop(tmp, 0);
+  check("pop 恢复修改", popped.unstaged.some((e) => e.path === "README.md"));
+  eq("pop 消耗 stash 条目", (await core.getStashes(tmp)).stashes.length, 0);
+  wireCheck("stashPop", { status: popped });
+
+  await core.discardFiles(tmp, ["README.md", "s1.txt"], true);
+  // 两次 stash 之间必须真的制造改动——干净树上 stash push 不会建条目
+  await writeFile(join(tmp, "s2.txt"), "two\n");
+  await core.stashPush(tmp, "a", true);
+  await writeFile(join(tmp, "s3.txt"), "three\n");
+  await core.stashPush(tmp, "b", true);
+  eq("两条 stash", (await core.getStashes(tmp)).stashes.length, 2);
+  const dropped = await core.stashDrop(tmp, 0);
+  eq("drop 后剩 1 条", dropped.stashes.length, 1);
+  wireCheck("stashDrop", dropped);
+  const cleared = await core.stashClear(tmp);
+  eq("clear 后 0 条", cleared.stashes.length, 0);
+  wireCheck("stashClear", cleared);
+});
+
+live("stashPop 冲突不抛错 + abortMerge 兜底中止（干净文件改动保留、stash 条目保留）", async (tmp) => {
+  // c.txt 会冲突；d.txt 干净套用 —— 验证 Lead 裁决的兜底语义
+  await writeFile(join(tmp, "c.txt"), "base\n");
+  await writeFile(join(tmp, "d.txt"), "dbase\n");
+  await runShell(tmp, ["git", "add", "-A"]);
+  await runShell(tmp, ["git", "commit", "-m", "add c d"]);
+  await writeFile(join(tmp, "c.txt"), "stashed version\n");
+  await writeFile(join(tmp, "d.txt"), "dstashed\n");
+  await core.stashPush(tmp, "conflict stash", false);
+  await writeFile(join(tmp, "c.txt"), "main version\n");
+  await runShell(tmp, ["git", "commit", "-am", "main edits c"]);
+
+  const popRes = await core.stashPop(tmp, 0);
+  eq("pop 冲突不抛错", popRes.conflicted.some((e) => e.path === "c.txt"), true);
+  wireCheck("stashPop", { status: popRes });
+  eq("冲突 pop 后 stash 条目保留", (await core.getStashes(tmp)).stashes.length, 1);
+
+  // abortMerge 兜底：冲突文件 restore 回 HEAD，干净套用的 d.txt 保留，stash 条目保留
+  const ab = await core.abortMerge(tmp);
+  eq("abort 后无冲突", ab.conflicted, []);
+  const cAfter = (await readFile(join(tmp, "c.txt"), "utf8")).replace(/\r\n/g, "\n");
+  eq("c.txt 恢复 HEAD 版本", cAfter, "main version\n");
+  const dAfter = (await readFile(join(tmp, "d.txt"), "utf8")).replace(/\r\n/g, "\n");
+  eq("d.txt 干净套用的改动保留", dAfter, "dstashed\n");
+  eq("abort 后 stash 条目仍在", (await core.getStashes(tmp)).stashes.length, 1);
+});
+
+live("abortMerge: 无 unmerged 且无操作 HEAD 时照旧抛错（守门）", async (tmp) => {
+  let caught;
+  try { await core.abortMerge(tmp); } catch (e) { caught = e; }
+  check("抛 GitError", caught instanceof core.GitError);
+  check("message 说明无可中止操作", /可中止/.test(caught && caught.message));
+});
+
+live("tagCreate/tagDelete: annotated + force + lightweight + 指定 sha", async (tmp) => {
+  await writeFile(join(tmp, "x.txt"), "x\n");
+  await runShell(tmp, ["git", "add", "x.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "add x"]);
+  const sha1 = (await runShell(tmp, ["git", "rev-parse", "HEAD~1"])).stdout.trim();
+
+  let tg = await core.createTag(tmp, "v1.0", null, "annotated message\nline2", false);
+  const t = tg.tags.find((x) => x.name === "v1.0");
+  eq("annotated=true", t.annotated, true);
+  eq("message 多行保留", t.message, "annotated message\nline2");
+  check("sha 是 commit", /^[0-9a-f]{40}$/.test(t.sha));
+  eq("short 7 位", t.short, t.sha.slice(0, 7));
+  wireCheck("tagCreate", tg);
+
+  tg = await core.createTag(tmp, "v1.0", null, "forced update", true);
+  eq("force 覆盖 message", tg.tags.find((x) => x.name === "v1.0").message, "forced update");
+
+  tg = await core.createTag(tmp, "light", sha1, null, false);
+  const t2 = tg.tags.find((x) => x.name === "light");
+  eq("lightweight annotated=false", t2.annotated, false);
+  check("lightweight 无 message key", !("message" in t2));
+  eq("指定 sha 生效", t2.sha, sha1);
+
+  const listed = await core.getTags(tmp);
+  eq("tags 2 条", listed.tags.length, 2);
+  wireCheck("tags", listed);
+
+  tg = await core.deleteTag(tmp, "light");
+  eq("删除后 1 条", tg.tags.length, 1);
+  eq("剩 v1.0", tg.tags[0].name, "v1.0");
+  wireCheck("tagDelete", tg);
+
+  let caught;
+  try { await core.createTag(tmp, "-f", null, null, false); } catch (e) { caught = e; }
+  check("非法 tag 名拒绝", caught instanceof core.GitError);
+});
+
+live("resetRepo: soft/mixed/hard 三模式 + 白名单拒绝", async (tmp) => {
+  await writeFile(join(tmp, "x.txt"), "x\n");
+  await runShell(tmp, ["git", "add", "x.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "add x"]);
+  const sha1 = (await runShell(tmp, ["git", "rev-parse", "HEAD~1"])).stdout.trim();
+  const sha2 = (await runShell(tmp, ["git", "rev-parse", "HEAD"])).stdout.trim();
+
+  let st = await core.resetRepo(tmp, "soft", sha1);
+  eq("soft：HEAD 回退", st.headSha, sha1);
+  check("soft：x.txt 仍在 staged", st.staged.some((e) => e.path === "x.txt"));
+  eq("soft：工作区不动", st.unstaged, []);
+  wireCheck("reset", { status: st });
+
+  st = await core.resetRepo(tmp, "hard", sha2);
+  eq("hard：回到 sha2", st.headSha, sha2);
+  eq("hard：干净", st.staged.length + st.unstaged.length, 0);
+
+  st = await core.resetRepo(tmp, "mixed", sha1);
+  eq("mixed：HEAD 回退", st.headSha, sha1);
+  eq("mixed：staged 清空", st.staged, []);
+  check("mixed：x.txt 变未跟踪（内容保留）", st.untracked.includes("x.txt"));
+  const content = (await readFile(join(tmp, "x.txt"), "utf8")).replace(/\r\n/g, "\n");
+  eq("mixed：文件内容保留", content, "x\n");
+
+  st = await core.resetRepo(tmp, "hard", null);
+  eq("target 缺省 HEAD（mixed 后 HEAD 仍在 sha1，不移动）", st.headSha, sha1);
+
+  for (const [mode, target] of [["nuke", "HEAD"], ["hard", "--soft"], ["hard", "main"], ["hard", "HEAD@{yesterday}"]]) {
+    let caught;
+    try { await core.resetRepo(tmp, mode, target); } catch (e) { caught = e; }
+    check("拒绝 mode=" + mode + " target=" + target, caught instanceof core.GitError);
+  }
+});
+
+live("revert: 干净 + 冲突（REVERT_HEAD → abort / continue 全链路）", async (tmp) => {
+  await writeFile(join(tmp, "x.txt"), "v1\n");
+  await runShell(tmp, ["git", "add", "x.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "c1 v1"]);
+  const shaA = (await runShell(tmp, ["git", "rev-parse", "HEAD"])).stdout.trim();
+  await writeFile(join(tmp, "x.txt"), "v2\n");
+  await runShell(tmp, ["git", "commit", "-am", "c2 v2"]);
+  await writeFile(join(tmp, "y.txt"), "y\n");
+  await runShell(tmp, ["git", "add", "y.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "c3 add y"]);
+  const shaC = (await runShell(tmp, ["git", "rev-parse", "HEAD"])).stdout.trim();
+
+  // 干净 revert（撤掉 c3）
+  const rv = await core.revertCommit(tmp, shaC);
+  eq("干净 revert reverted=true", rv.reverted, true);
+  eq("无冲突", rv.status.conflicted, []);
+  eq("y.txt 已删除", existsSync(join(tmp, "y.txt")), false);
+  wireCheck("revert", rv);
+  const log1 = await core.getLog(tmp, { maxCount: 5 });
+  check("revert 提交落账", log1.commits[0].subject.includes("Revert"));
+
+  // 冲突 revert：撤 c1（x.txt 被 c2 改过）→ 冲突进 REVERT_HEAD
+  const rv2 = await core.revertCommit(tmp, shaA);
+  eq("冲突 revert 不抛错 reverted=false", rv2.reverted, false);
+  check("conflicted 含 x.txt", rv2.status.conflicted.some((e) => e.path === "x.txt"));
+  wireCheck("revert", rv2);
+  const gitDirAbs = resolve(tmp, ".git");
+  check("REVERT_HEAD 在场", existsSync(join(gitDirAbs, "REVERT_HEAD")));
+
+  // abort：revert --abort 分支恢复
+  await core.abortMerge(tmp);
+  check("abort 后 REVERT_HEAD 清除", !existsSync(join(gitDirAbs, "REVERT_HEAD")));
+  eq("abort 后无冲突", (await core.getStatus(tmp)).conflicted, []);
+
+  // 再次冲突 → 手动解决（custom 内容，保证 revert 提交非空）→ mergeContinue 完成
+  const rv3 = await core.revertCommit(tmp, shaA);
+  eq("再次冲突", rv3.reverted, false);
+  await writeFile(join(tmp, "x.txt"), "resolved\n");
+  await runShell(tmp, ["git", "add", "x.txt"]);
+  const done = await core.continueMerge(tmp);
+  eq("continue 后冲突清空", done.conflicted, []);
+  check("continue 后 REVERT_HEAD 清除", !existsSync(join(gitDirAbs, "REVERT_HEAD")));
+  const log2 = await core.getLog(tmp, { maxCount: 5 });
+  check("revert 以原提交信息落账", /Revert "c1 v1"/.test(log2.commits[0].subject));
+  const finalX = (await readFile(join(tmp, "x.txt"), "utf8")).replace(/\r\n/g, "\n");
+  eq("解决内容保留", finalX, "resolved\n");
+});
+
+live("getBlame: 全量 + 行区间 + ref 参数", async (tmp) => {
+  const lines = [];
+  for (let i = 1; i <= 10; i++) lines.push("line" + i);
+  await writeFile(join(tmp, "f.txt"), lines.join("\n") + "\n");
+  await runShell(tmp, ["git", "add", "f.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "add f"]);
+  lines[0] = "line1-changed";
+  await writeFile(join(tmp, "f.txt"), lines.join("\n") + "\n");
+  await runShell(tmp, ["git", "commit", "-am", "edit line1"]);
+
+  const b = await core.getBlame(tmp, { file: "f.txt" });
+  eq("行数=10", b.lines.length, 10);
+  eq("truncated=false", b.truncated, false);
+  eq("首行 text", b.lines[0].text, "line1-changed");
+  check("首行 sha 40 位", /^[0-9a-f]{40}$/.test(b.lines[0].sha));
+  eq("行号 1..10", b.lines.map((l) => l.line), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  check("author 非空", b.lines[0].author.length > 0);
+  check("at 是时间戳", b.lines[0].at > 0);
+  wireCheck("blame", b);
+
+  const b2 = await core.getBlame(tmp, { file: "f.txt", start: 2, end: 4 });
+  eq("区间 3 行", b2.lines.length, 3);
+  eq("区间起始行号", b2.lines[0].line, 2);
+  wireCheck("blame", b2);
+
+  const b3 = await core.getBlame(tmp, { file: "f.txt", ref: "HEAD~1" });
+  eq("ref=HEAD~1 时首行是旧内容", b3.lines[0].text, "line1");
+
+  let caught;
+  try { await core.getBlame(tmp, { file: "../escape.txt" }); } catch (e) { caught = e; }
+  check("越界 file 拒绝", caught instanceof core.GitError);
+  caught = undefined;
+  try { await core.getBlame(tmp, { file: "f.txt", start: 5, end: 2 }); } catch (e) { caught = e; }
+  check("start>end 拒绝", caught instanceof core.GitError);
+});
+
+live("getDiffRange: patch/stat + file 过滤", async (tmp) => {
+  await writeFile(join(tmp, "a.txt"), "a1\n");
+  await writeFile(join(tmp, "b.txt"), "b1\n");
+  await runShell(tmp, ["git", "add", "-A"]);
+  await runShell(tmp, ["git", "commit", "-m", "add a b"]);
+  await writeFile(join(tmp, "a.txt"), "a2\n");
+  await writeFile(join(tmp, "b.txt"), "b2\n");
+  await runShell(tmp, ["git", "commit", "-am", "edit a b"]);
+  const sha1 = (await runShell(tmp, ["git", "rev-parse", "HEAD~1"])).stdout.trim();
+  const sha2 = (await runShell(tmp, ["git", "rev-parse", "HEAD"])).stdout.trim();
+
+  const stat = await core.getDiffRange(tmp, { from: sha1, to: sha2, kind: "stat" });
+  check("stat 含 file changed", /file[s]? changed/.test(stat.text));
+  eq("stat truncated=false", stat.truncated, false);
+  wireCheck("diffRange", stat);
+
+  const patch = await core.getDiffRange(tmp, { from: sha1, to: sha2 });
+  check("patch 含 diff --git", patch.text.includes("diff --git"));
+  check("patch 含两个文件", patch.text.includes("a.txt") && patch.text.includes("b.txt"));
+  wireCheck("diffRange", patch);
+
+  const one = await core.getDiffRange(tmp, { from: sha1, to: sha2, file: "a.txt" });
+  check("file 过滤只剩 a.txt", one.text.includes("a.txt") && !one.text.includes("b.txt"));
+
+  let caught;
+  try { await core.getDiffRange(tmp, { from: "--output=/tmp/evil" }); } catch (e) { caught = e; }
+  check("非法 from 拒绝", caught instanceof core.GitError);
+});
+
+live("getReflog: entries 解析 + limit", async (tmp) => {
+  await writeFile(join(tmp, "z.txt"), "z\n");
+  await runShell(tmp, ["git", "add", "z.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "add z"]);
+  const r = await core.getReflog(tmp, { limit: 10 });
+  check("至少 2 条", r.entries.length >= 2, "got=" + r.entries.length);
+  check("selector 是 HEAD@{n}", /^HEAD@\{\d+\}$/.test(r.entries[0].selector));
+  check("message 含 commit", /commit/.test(r.entries[0].message));
+  check("sha 40 位", /^[0-9a-f]{40}$/.test(r.entries[0].sha));
+  check("at 是时间戳", r.entries[0].at > 0);
+  wireCheck("reflog", r);
+  const r2 = await core.getReflog(tmp, { limit: 1 });
+  eq("limit 生效", r2.entries.length, 1);
+});
+
+live("getLog: ref/file/author/grep/since/until 过滤", async (tmp) => {
+  await writeFile(join(tmp, "f.txt"), "f\n");
+  await runShell(tmp, ["git", "add", "f.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "feat: add f"]);
+  await runShell(tmp, ["git", "-c", "user.name=Other", "-c", "user.email=o@e.com", "commit", "--allow-empty", "-m", "chore: empty by other"]);
+
+  // ref 过滤 = 从该 ref 开始的历史遍历（HEAD~1 含它自己的祖先）
+  const byRef = await core.getLog(tmp, { maxCount: 10, ref: "HEAD~1" });
+  eq("ref=HEAD~1 遍历 2 条（feat + initial）", byRef.commits.length, 2);
+  eq("ref=HEAD~1 顶端是 feat: add f", byRef.commits[0].subject, "feat: add f");
+  wireCheck("log", Object.assign({}, byRef, { graph: computeGraph(byRef.commits) }));
+
+  const byFile = await core.getLog(tmp, { maxCount: 10, file: "f.txt" });
+  eq("file 过滤只 1 条", byFile.commits.length, 1);
+  eq("file 过滤命中 feat: add f", byFile.commits[0].subject, "feat: add f");
+
+  const byAuthor = await core.getLog(tmp, { maxCount: 10, author: "Other" });
+  eq("author 过滤只 1 条", byAuthor.commits.length, 1);
+  eq("author 命中 chore", byAuthor.commits[0].subject, "chore: empty by other");
+  wireCheck("log", Object.assign({}, byAuthor, { graph: computeGraph(byAuthor.commits) }));
+
+  const byGrep = await core.getLog(tmp, { maxCount: 10, grep: "chore" });
+  eq("grep 过滤只 1 条", byGrep.commits.length, 1);
+
+  const bySince = await core.getLog(tmp, { maxCount: 10, since: "1990-01-01" });
+  eq("since=1990 全部命中（initial + feat + chore）", bySince.commits.length, 3);
+  // 注意：until 不用远未来日期（如 2100）——git approxidate 在 2038 时间戳边界
+  // 处会解析出负值导致结果为空（上游行为），测试只用 2035 以内的日期。
+  const byUntil = await core.getLog(tmp, { maxCount: 10, until: "1990-01-01" });
+  eq("until=1990 全部排除", byUntil.commits.length, 0);
+  const byBoth = await core.getLog(tmp, { maxCount: 10, since: "1990-01-01", until: "2035-01-01" });
+  eq("since+until 组合", byBoth.commits.length, 3);
+});
+
+live("getLog: body 多行正文带出（amend 预填）", async (tmp) => {
+  await writeFile(join(tmp, "b.txt"), "b\n");
+  await runShell(tmp, ["git", "add", "b.txt"]);
+  // commitStaged 单 argv -m 传多行 message（与客户端提交框同路径）
+  const c = await core.commitStaged(tmp, "subject line\n\nbody para1\nbody para2", false);
+  check("commit 返回短 sha", /^[0-9a-f]{7,}$/.test(c.commit));
+  const r = await core.getLog(tmp, { maxCount: 5 });
+  eq("body 多行解析", r.commits[0].body, "body para1\nbody para2");
+  eq("subject 只取首行", r.commits[0].subject, "subject line");
+  eq("无正文挂空串", r.commits[1].body, "");
+  wireCheck("log", Object.assign({}, r, { graph: computeGraph(r.commits) }));
+});
+
+test("pushBranch: refSpec 推送 tag 到本地 bare remote（wire 守卫）", async () => {
+  if (!GIT_AVAILABLE) return;
+  const tmpRoot = await mkdtemp(join(tmpdir(), "dsh-git-tagpush-"));
+  const bare = join(tmpRoot, "origin.git");
+  const work = join(tmpRoot, "work");
+  try {
+    await runShell(tmpRoot, ["git", "init", "--bare", "-b", "main", bare]);
+    await runShell(tmpRoot, ["git", "clone", bare, work]);
+    await runShell(work, ["git", "config", "user.email", "test@example.com"]);
+    await runShell(work, ["git", "config", "user.name", "T"]);
+    await runShell(work, ["git", "config", "commit.gpgsign", "false"]);
+    await writeFile(join(work, "a.txt"), "a\n");
+    await runShell(work, ["git", "add", "a.txt"]);
+    await runShell(work, ["git", "commit", "-m", "initial"]);
+    await runShell(work, ["git", "push", "-u", "origin", "main"]);
+
+    await core.createTag(work, "v1.0", null, "release v1.0", true);
+    // pushBranch 拼装为 git push [--force-with-lease] <remote> <refSpec>：
+    // refSpec 落在 refspec 位置参数、绝不在 repository 位置参数
+    const r = await core.pushBranch(work, { remote: "origin", refSpec: "refs/tags/v1.0" });
+    check("output 字符串", typeof r.output === "string");
+    eq("status 干净", r.status.unstaged.length + r.status.untracked.length, 0);
+    wireCheck("push", r);
+    const showRef = await runShell(bare, ["git", "show-ref", "--tags"]);
+    check("bare remote 已有 v1.0", /refs\/tags\/v1\.0/.test(showRef.stdout));
+    // 远端 ls-remote 视角复核（契约 §6 push refSpec 核对项）
+    const ls = await runShell(work, ["git", "ls-remote", "--tags", "origin"]);
+    check("ls-remote 能看到 refs/tags/v1.0", /refs\/tags\/v1\.0/.test(ls.stdout));
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+live("remoteAdd/remoteRename/remoteRemove: 返回新列表 + 白名单", async (tmp) => {
+  let r = await core.addRemote(tmp, "origin", "https://example.com/x.git", "git@example.com:x.git");
+  eq("1 个 remote", r.remotes.length, 1);
+  eq("fetchUrl", r.remotes[0].fetchUrl, "https://example.com/x.git");
+  eq("pushUrl", r.remotes[0].pushUrl, "git@example.com:x.git");
+  wireCheck("remoteAdd", r);
+
+  r = await core.addRemote(tmp, "backup", "https://example.com/backup.git", null);
+  eq("2 个 remote", r.remotes.length, 2);
+  wireCheck("remoteAdd", r);
+
+  r = await core.renameRemote(tmp, "origin", "upstream");
+  check("rename 生效", r.remotes.some((x) => x.name === "upstream") && !r.remotes.some((x) => x.name === "origin"));
+  wireCheck("remoteRename", r);
+
+  r = await core.removeRemote(tmp, "backup");
+  eq("remove 后 1 个", r.remotes.length, 1);
+  wireCheck("remoteRemove", r);
+
+  let caught;
+  try { await core.addRemote(tmp, "-x", "https://e.com/x.git", null); } catch (e) { caught = e; }
+  check("非法 remote 名拒绝", caught instanceof core.GitError);
+  caught = undefined;
+  try { await core.addRemote(tmp, "ok", "-evil", null); } catch (e) { caught = e; }
+  check("非法 url 拒绝", caught instanceof core.GitError);
+});
+
+test("configList/configSet/configUnset: local + global（GIT_CONFIG_GLOBAL 临时全局，不碰真实配置）", async () => {
+  if (!GIT_AVAILABLE) return;
+  const tmp = await makeRepo();
+  const savedGlobal = process.env.GIT_CONFIG_GLOBAL;
+  const globalCfgDir = await mkdtemp(join(tmpdir(), "dsh-git-globalcfg-"));
+  process.env.GIT_CONFIG_GLOBAL = join(globalCfgDir, "gitconfig");
+  try {
+    // local
+    let e = await core.setConfig(tmp, "test.key", "hello", false);
+    let entry = e.entries.find((x) => x.key === "test.key");
+    eq("local set 返回新列表", entry, { key: "test.key", value: "hello" });
+    wireCheck("configSet", e);
+    e = await core.getConfig(tmp, false);
+    check("local list 含 test.key", e.entries.some((x) => x.key === "test.key" && x.value === "hello"));
+    wireCheck("configList", e);
+    e = await core.unsetConfig(tmp, "test.key", false);
+    check("local unset 生效", !e.entries.some((x) => x.key === "test.key"));
+    wireCheck("configUnset", e);
+
+    // global（GIT_CONFIG_GLOBAL 指向临时文件）
+    e = await core.setConfig(tmp, "g.key", "gval", true);
+    check("global set", e.entries.some((x) => x.key === "g.key" && x.value === "gval"));
+    wireCheck("configSet", e);
+    e = await core.getConfig(tmp, true);
+    wireCheck("configList", e);
+    e = await core.unsetConfig(tmp, "g.key", true);
+    check("global unset 生效", !e.entries.some((x) => x.key === "g.key"));
+    wireCheck("configUnset", e);
+
+    let caught;
+    try { await core.setConfig(tmp, "-evil", "v", false); } catch (e2) { caught = e2; }
+    check("非法 key 拒绝", caught instanceof core.GitError);
+  } finally {
+    if (savedGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = savedGlobal;
+    await rm(globalCfgDir, { recursive: true, force: true });
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// v2 wire 合规（live）：每个新增/扩展 Remote 方法的真实返回结构过两道网关校验
+// （strict schema parse + assertJsonSafe 复刻）。组装方式与 index.js 逐字段一致。
+// ============================================================================
+
+live("wire: v2 新增 Remote 方法返回值过 strict schema + JSON-safe", async (tmp) => {
+  // stageHunk
+  await writeFile(join(tmp, "m.txt"), "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
+  await runShell(tmp, ["git", "add", "m.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "add m"]);
+  const stgLines = ["l1x", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10x"];
+  await writeFile(join(tmp, "m.txt"), stgLines.join("\n") + "\n");
+  wireCheck("stageHunk", { status: await core.stageHunkFile(tmp, { file: "m.txt", hunkIndex: 0 }) });
+  await core.resetRepo(tmp, "hard", "HEAD");
+
+  // stash 全家（push → list → apply → pop → push → drop → clear）
+  await writeFile(join(tmp, "u.txt"), "u\n");
+  wireCheck("stashPush", await core.stashPush(tmp, "wire stash", true));
+  wireCheck("stashList", await core.getStashes(tmp));
+  wireCheck("stashApply", { status: await core.stashApply(tmp, 0) });
+  await core.discardFiles(tmp, ["u.txt"], true);
+  wireCheck("stashPop", { status: await core.stashPop(tmp, 0) });
+  await core.discardFiles(tmp, ["u.txt"], true);
+  await writeFile(join(tmp, "u.txt"), "u2\n"); // 干净树上 stash push 不建条目，必须有改动
+  await core.stashPush(tmp, "wire stash 2", true);
+  wireCheck("stashDrop", await core.stashDrop(tmp, 0));
+  wireCheck("stashClear", await core.stashClear(tmp));
+
+  // tag 全家
+  wireCheck("tagCreate", await core.createTag(tmp, "v1.0", null, "annotated msg", true));
+  wireCheck("tags", await core.getTags(tmp));
+  wireCheck("tagDelete", await core.deleteTag(tmp, "v1.0"));
+
+  // blame / diffRange / reflog / log 过滤（放在 revert 之前：revert 会删掉 m.txt）
+  const shaHead = (await core.getLog(tmp, { maxCount: 1 })).commits[0].sha;
+  const shaPrev = (await core.getLog(tmp, { maxCount: 2 })).commits[1].sha;
+  wireCheck("blame", await core.getBlame(tmp, { file: "m.txt" }));
+  wireCheck("diffRange", await core.getDiffRange(tmp, { from: shaPrev, to: shaHead, kind: "stat" }));
+  wireCheck("diffRange", await core.getDiffRange(tmp, { from: shaPrev, to: shaHead }));
+  wireCheck("reflog", await core.getReflog(tmp, { limit: 20 }));
+  const filtered = await core.getLog(tmp, { maxCount: 20, author: "Test User", grep: "commit", since: "1990-01-01", until: "2035-01-01", file: "README.md" });
+  wireCheck("log", Object.assign({}, filtered, { graph: computeGraph(filtered.commits) }));
+
+  // remote / config（local；global 路径在 config 测试里覆盖）
+  wireCheck("remoteAdd", await core.addRemote(tmp, "wire-remote", "https://example.com/wire.git", null));
+  wireCheck("remoteRename", await core.renameRemote(tmp, "wire-remote", "wire-remote2"));
+  wireCheck("remoteRemove", await core.removeRemote(tmp, "wire-remote2"));
+  wireCheck("configSet", await core.setConfig(tmp, "wire.key", "wireval", false));
+  wireCheck("configList", await core.getConfig(tmp, false));
+  wireCheck("configUnset", await core.unsetConfig(tmp, "wire.key", false));
+
+  // reset / revert（放最后：revert 会改/删文件）
+  wireCheck("reset", { status: await core.resetRepo(tmp, "soft", "HEAD") });
+  wireCheck("revert", await core.revertCommit(tmp, shaHead));
+  // 冲突形状（reverted=false + status 带 conflicted）在 revert live 测试里 wireCheck
+});
+
+// ============================================================================
+// P3-A（§8.3）extractLinePatch fixture 矩阵 + rebase 纯函数 fixture
+// ============================================================================
+
+const LINE_DIFF = [
+  "diff --git a/f.txt b/f.txt",
+  "index 1111111..2222222 100644",
+  "--- a/f.txt",
+  "+++ b/f.txt",
+  "@@ -10,5 +10,6 @@ hint-here",
+  " a1",
+  " a2",
+  "-b1",
+  "+B1",
+  "+B2",
+  " a3",
+  " a4",
+  "@@ -20,3 +20,3 @@ tail",
+  " q1",
+  "-q2",
+  "+Q2",
+  " q3",
+  "",
+].join("\n");
+// hunk0 可寻址行（0 基）：0=" a1" 1=" a2" 2="-b1" 3="+B1" 4="+B2" 5=" a3" 6=" a4"
+// hunk1 可寻址行：0=" q1" 1="-q2" 2="+Q2" 3=" q3"
+
+test("extractLinePatch: 中段混合区间（ctx+del+add）+ @@ 头重写", () => {
+  const p = core.extractLinePatch(LINE_DIFF, "f.txt", 0, 2, 3);
+  eq("中段 [2,3]", p, [
+    "diff --git a/f.txt b/f.txt",
+    "index 1111111..2222222 100644",
+    "--- a/f.txt",
+    "+++ b/f.txt",
+    "@@ -12 +12 @@ hint-here",
+    "-b1",
+    "+B1",
+    "",
+  ].join("\n"));
+});
+
+test("extractLinePatch: 纯 add 区间（旧侧 count=0 → start=插入点前一行）", () => {
+  const p = core.extractLinePatch(LINE_DIFF, "f.txt", 0, 3, 4);
+  check("头 -12,0 +12,2", p.includes("@@ -12,0 +12,2 @@ hint-here"));
+  check("只含 +B1/+B2", p.includes("+B1") && p.includes("+B2") && !p.includes("-b1"));
+});
+
+test("extractLinePatch: 纯 del 区间（新侧 count=0）", () => {
+  const p = core.extractLinePatch(LINE_DIFF, "f.txt", 0, 2, 2);
+  check("头 -12 +11,0", p.includes("@@ -12 +11,0 @@ hint-here"));
+  check("只含 -b1", p.includes("-b1") && !p.includes("+B1"));
+});
+
+test("extractLinePatch: 开头/结尾区间", () => {
+  const pStart = core.extractLinePatch(LINE_DIFF, "f.txt", 0, 0, 1);
+  check("开头 [0,1] 头", pStart.includes("@@ -10,2 +10,2 @@ hint-here"));
+  check("开头行", pStart.includes(" a1") && pStart.includes(" a2") && !pStart.includes("-b1"));
+  const pEnd = core.extractLinePatch(LINE_DIFF, "f.txt", 0, 5, 6);
+  check("结尾 [5,6] 头", pEnd.includes("@@ -13,2 +14,2 @@ hint-here"));
+  check("结尾行", pEnd.includes(" a3") && pEnd.includes(" a4") && !pEnd.includes(" a1"));
+});
+
+test("extractLinePatch: 覆盖整个 hunk 与 extractHunkPatch 逐字节一致", () => {
+  for (const [h, rows] of [[0, 6], [1, 3]]) {
+    const full = core.extractLinePatch(LINE_DIFF, "f.txt", h, 0, rows);
+    eq("hunk " + h + " 整段 === extractHunkPatch", full, core.extractHunkPatch(LINE_DIFF, "f.txt", h));
+  }
+});
+
+test("extractLinePatch: 多 hunk 文件只切指定块", () => {
+  const p = core.extractLinePatch(LINE_DIFF, "f.txt", 1, 1, 2);
+  check("头 -21 +21", p.includes("@@ -21 +21 @@ tail"));
+  check("含 hunk1 行", p.includes("-q2") && p.includes("+Q2"));
+  check("不含 hunk0 行", !p.includes("B1") && !p.includes("b1"));
+});
+
+test("extractLinePatch: \\ No newline 标记随选中行带出、不计下标", () => {
+  const diff = [
+    "diff --git a/n.txt b/n.txt",
+    "--- a/n.txt",
+    "+++ b/n.txt",
+    "@@ -1,2 +1,2 @@",
+    " x",
+    "-y",
+    "+Y",
+    "\\ No newline at end of file",
+  ].join("\n");
+  const p = core.extractLinePatch(diff, "n.txt", 0, 2, 2);
+  check("含 +Y 与标记行", p.includes("+Y") && p.includes("\\ No newline at end of file"));
+  check("不含 -y", !p.includes("-y"));
+  check("头 -2,0 +2", p.includes("@@ -2,0 +2 @@"));
+});
+
+test("extractLinePatch: 非法输入全部抛 GitError", () => {
+  const cases = [
+    ["rowStart>rowEnd", () => core.extractLinePatch(LINE_DIFF, "f.txt", 0, 3, 2)],
+    ["行越界", () => core.extractLinePatch(LINE_DIFF, "f.txt", 0, 0, 99)],
+    ["负下标", () => core.extractLinePatch(LINE_DIFF, "f.txt", 0, -1, 1)],
+    ["hunkIndex 越界", () => core.extractLinePatch(LINE_DIFF, "f.txt", 5, 0, 1)],
+    ["未知文件", () => core.extractLinePatch(LINE_DIFF, "nope.txt", 0, 0, 1)],
+    ["空 diff", () => core.extractLinePatch("", "f.txt", 0, 0, 1)],
+    ["非整数下标", () => core.extractLinePatch(LINE_DIFF, "f.txt", 0, "a", 1)],
+  ];
+  for (const [label, fn] of cases) {
+    let caught;
+    try { fn(); } catch (e) { caught = e; }
+    check("抛 GitError：" + label, caught instanceof core.GitError);
+  }
+});
+
+test("rebase 纯函数: buildRebaseTodo / normalizeRebaseEntry（防 todo 注入）", () => {
+  const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40), D = "d".repeat(40);
+  const todo = core.buildRebaseTodo([
+    { action: "pick", sha: A, subject: "first" },
+    { action: "squash", sha: B, subject: "second", message: "MSG" },
+    { action: "drop", sha: C, subject: "evil\nexec touch pwned" },
+    { action: "fixup", sha: D, subject: "fourth", message: "IGNORED" },
+  ]);
+  const lines = todo.split("\n");
+  eq("4 行 + 尾换行", lines.length, 5);
+  eq("pick 行", lines[0], "pick " + A + " first");
+  eq("squash 行", lines[1], "squash " + B + " second");
+  eq("subject 换行被压平（防注入 exec 行）", lines[2], "drop " + C + " evil exec touch pwned");
+  eq("fixup 行", lines[3], "fixup " + D + " fourth");
+  // message 归一化：squash 保留、fixup 忽略（Lead 裁决 Q2）
+  const nSquash = core.normalizeRebaseEntry({ action: "squash", sha: B, subject: "s", message: "M" });
+  eq("squash+message 保留", nSquash.message, "M");
+  const nFixup = core.normalizeRebaseEntry({ action: "fixup", sha: B, subject: "s", message: "M" });
+  check("fixup+message 被忽略", !("message" in nFixup));
+  for (const bad of [
+    { action: "exec", sha: A, subject: "x" },              // action 枚举
+    { action: "pick", sha: "--output=evil", subject: "x" }, // sha 白名单
+    { action: "pick", sha: "abc;rm -rf", subject: "x" },
+    null,
+  ]) {
+    let caught;
+    try { core.normalizeRebaseEntry(bad, "t"); } catch (e) { caught = e; }
+    check("拒绝非法条目 " + JSON.stringify(bad), caught instanceof core.GitError);
+  }
+  let caught;
+  try { core.buildRebaseTodo([]); } catch (e) { caught = e; }
+  check("空 entries 抛错", caught instanceof core.GitError);
+});
+
+test("rebase 纯函数: parseRebasePlan + buildEditorCommand", () => {
+  const A = "a".repeat(40), B = "b".repeat(40);
+  const r = core.parseRebasePlan(A + "\x1faaaaaaa\x1foldest first\0" + B + "\x1fbbbbbbb\x1fsecond\0");
+  eq("count", r.length, 2);
+  eq("最旧在前保序", r.map((e) => e.subject), ["oldest first", "second"]);
+  eq("action=pick", r[0].action, "pick");
+  eq("sha", r[0].sha, A);
+  check("无 message key（JSON-safe）", !("message" in r[0]));
+  eq("empty", core.parseRebasePlan(""), []);
+
+  const cmd = core.buildEditorCommand("C:\\path with space\\ed it.mjs", "seq");
+  check("以模式收尾", / seq$/.test(cmd));
+  check("解释器与脚本双引号包裹", cmd.split('"').length - 1 >= 4);
+  check("空格路径整体保留在引号内", cmd.includes("path with space"));
+});
+
+// ============================================================================
+// P3-A live（§8.7）：lineApply 三模式 / rebase 全家 / fixupCommit / rebaseBranch /
+// mergeContinue+abortMerge rebase 分派
+// ============================================================================
+
+live("lineApply: stage/unstage/discard 三模式（含跨 ctx/+/- 混合区间）", async (tmp) => {
+  const lines = [];
+  for (let i = 1; i <= 20; i++) lines.push("line" + i);
+  await writeFile(join(tmp, "multi.txt"), lines.join("\n") + "\n");
+  await runShell(tmp, ["git", "add", "multi.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "multi"]);
+  lines[1] = "line2-changed";
+  lines[17] = "line18-changed";
+  await writeFile(join(tmp, "multi.txt"), lines.join("\n") + "\n");
+  // hunk0（context 3）addr 行：0=" line1" 1="-line2" 2="+line2-changed" 3..5=ctx
+
+  // 1) discard：只选 -/+ 对（rows 1..2）→ 只回退 line2
+  let st = await core.applyLine(tmp, { file: "multi.txt", scope: "unstaged", mode: "discard", hunkIndex: 0, rowStart: 1, rowEnd: 2 });
+  let after = (await readFile(join(tmp, "multi.txt"), "utf8")).replace(/\r\n/g, "\n").split("\n");
+  eq("discard 行区间只回退 line2", after[1], "line2");
+  eq("line18 改动保留", after[17], "line18-changed");
+  wireCheck("lineApply", { status: st });
+
+  // 2) stage：混合区间（含 ctx，rows 0..2）→ 暂存 line2 改动
+  lines[1] = "line2-changed";
+  await writeFile(join(tmp, "multi.txt"), lines.join("\n") + "\n");
+  st = await core.applyLine(tmp, { file: "multi.txt", scope: "unstaged", mode: "stage", hunkIndex: 0, rowStart: 0, rowEnd: 2 });
+  check("stage 后 multi.txt 在 staged", st.staged.some((e) => e.path === "multi.txt"));
+  check("仍在 unstaged（剩 line18 块）", st.unstaged.some((e) => e.path === "multi.txt"));
+  const sd = await core.getDiff(tmp, { scope: "staged", file: "multi.txt" });
+  check("staged diff 含 line2-changed", sd.text.includes("line2-changed"));
+  check("staged diff 不含 line18-changed", !sd.text.includes("line18-changed"));
+  wireCheck("lineApply", { status: st });
+
+  // 3) unstage：staged diff 的 -/+ 对（rows 1..2）→ 改动移回工作区
+  st = await core.applyLine(tmp, { file: "multi.txt", scope: "staged", mode: "unstage", hunkIndex: 0, rowStart: 1, rowEnd: 2 });
+  check("unstage 后 staged 清空", !st.staged.some((e) => e.path === "multi.txt"));
+  check("改动回到 unstaged", st.unstaged.some((e) => e.path === "multi.txt"));
+  after = (await readFile(join(tmp, "multi.txt"), "utf8")).replace(/\r\n/g, "\n").split("\n");
+  eq("unstage 不丢内容（line2-changed 保留）", after[1], "line2-changed");
+  wireCheck("lineApply", { status: st });
+
+  // 非法组合/区间拒绝
+  for (const [label, opts] of [
+    ["scope/mode 组合非法", { file: "multi.txt", scope: "staged", mode: "discard", hunkIndex: 0, rowStart: 0, rowEnd: 1 }],
+    ["rowStart>rowEnd", { file: "multi.txt", scope: "unstaged", mode: "stage", hunkIndex: 0, rowStart: 3, rowEnd: 1 }],
+  ]) {
+    let caught;
+    try { await core.applyLine(tmp, opts); } catch (e) { caught = e; }
+    check("拒绝：" + label, caught instanceof core.GitError);
+  }
+});
+
+live("lineApply: 覆盖整个 hunk 与 hunkApply 等价（同型双文件对照）", async (tmp) => {
+  for (const name of ["hunkA.txt", "hunkB.txt"]) {
+    const lines = [];
+    for (let i = 1; i <= 20; i++) lines.push("line" + i);
+    await writeFile(join(tmp, name), lines.join("\n") + "\n");
+  }
+  await runShell(tmp, ["git", "add", "-A"]);
+  await runShell(tmp, ["git", "commit", "-m", "two files"]);
+  for (const name of ["hunkA.txt", "hunkB.txt"]) {
+    const lines = [];
+    for (let i = 1; i <= 20; i++) lines.push("line" + i);
+    lines[1] = "line2-changed";
+    await writeFile(join(tmp, name), lines.join("\n") + "\n");
+  }
+  await core.applyHunk(tmp, { scope: "worktree", file: "hunkA.txt", hunkIndex: 0 });
+  await core.applyLine(tmp, { file: "hunkB.txt", scope: "unstaged", mode: "discard", hunkIndex: 0, rowStart: 0, rowEnd: 5 });
+  const a = (await readFile(join(tmp, "hunkA.txt"), "utf8")).replace(/\r\n/g, "\n");
+  const b = (await readFile(join(tmp, "hunkB.txt"), "utf8")).replace(/\r\n/g, "\n");
+  eq("整 hunk lineApply 结果 === hunkApply 结果", b, a);
+  eq("两者都已回退 line2", a.split("\n")[1], "line2");
+});
+
+live("rebasePlan/rebaseRun: drop + reorder", async (tmp) => {
+  for (const n of ["f1", "f2", "f3", "f4"]) {
+    await writeFile(join(tmp, n + ".txt"), n + "\n");
+    await runShell(tmp, ["git", "add", n + ".txt"]);
+    await runShell(tmp, ["git", "commit", "-m", "add " + n]);
+  }
+  const base = (await runShell(tmp, ["git", "rev-parse", "HEAD~4"])).stdout.trim();
+  const plan = await core.rebasePlan(tmp, base);
+  eq("plan 4 条（base..HEAD 不含 base）", plan.entries.length, 4);
+  eq("最旧在前", plan.entries.map((e) => e.subject), ["add f1", "add f2", "add f3", "add f4"]);
+  check("action 全 pick", plan.entries.every((e) => e.action === "pick"));
+  wireCheck("rebasePlan", plan);
+
+  const [e1, e2, e3, e4] = plan.entries;
+  const run = await core.rebaseRun(tmp, base, [
+    { action: "pick", sha: e3.sha, subject: e3.subject },
+    { action: "pick", sha: e1.sha, subject: e1.subject },
+    { action: "drop", sha: e2.sha, subject: e2.subject },
+    { action: "pick", sha: e4.sha, subject: e4.subject },
+  ]);
+  eq("done=true", run.done, true);
+  eq("无冲突", run.status.conflicted, []);
+  wireCheck("rebaseRun", run);
+  const subjects = (await core.getLog(tmp, { maxCount: 10 })).commits.map((c) => c.subject);
+  eq("历史=initial,f3,f1,f4（f2 drop、f3 提前）", subjects, ["add f4", "add f1", "add f3", "initial commit"]);
+  eq("f2.txt 已随 drop 消失", existsSync(join(tmp, "f2.txt")), false);
+});
+
+live("rebaseRun: squash+message 替换 + 多 squash 队列按序消费", async (tmp) => {
+  for (const n of ["a", "b", "c", "d"]) {
+    await writeFile(join(tmp, n + ".txt"), n + "\n");
+    await runShell(tmp, ["git", "add", n + ".txt"]);
+    await runShell(tmp, ["git", "commit", "-m", "add " + n]);
+  }
+  const base = (await runShell(tmp, ["git", "rev-parse", "HEAD~4"])).stdout.trim();
+  const plan = await core.rebasePlan(tmp, base);
+  const [e1, e2, e3, e4] = plan.entries;
+  const run = await core.rebaseRun(tmp, base, [
+    { action: "pick", sha: e1.sha, subject: e1.subject },
+    { action: "squash", sha: e2.sha, subject: e2.subject, message: "SQUASH MSG A" },
+    { action: "pick", sha: e3.sha, subject: e3.subject },
+    { action: "squash", sha: e4.sha, subject: e4.subject, message: "SQUASH MSG B" },
+  ]);
+  eq("done=true", run.done, true);
+  wireCheck("rebaseRun", run);
+  const subjects = (await core.getLog(tmp, { maxCount: 10 })).commits.map((c) => c.subject);
+  eq("两组 squash 各自合并并替换信息", subjects, ["SQUASH MSG B", "SQUASH MSG A", "initial commit"]);
+});
+
+live("rebaseRun: fixup 带 message 被忽略 + edit 停驻 done=false → mergeContinue（rebase 分派）完成", async (tmp) => {
+  for (const n of ["a", "b", "c"]) {
+    await writeFile(join(tmp, n + ".txt"), n + "\n");
+    await runShell(tmp, ["git", "add", n + ".txt"]);
+    await runShell(tmp, ["git", "commit", "-m", "add " + n]);
+  }
+  const base = (await runShell(tmp, ["git", "rev-parse", "HEAD~3"])).stdout.trim();
+  const plan = await core.rebasePlan(tmp, base);
+  const [e1, e2, e3] = plan.entries;
+  const run = await core.rebaseRun(tmp, base, [
+    { action: "pick", sha: e1.sha, subject: e1.subject },
+    { action: "fixup", sha: e2.sha, subject: e2.subject, message: "SHOULD NOT APPEAR" },
+    { action: "edit", sha: e3.sha, subject: e3.subject },
+  ]);
+  eq("edit 停驻 done=false", run.done, false);
+  eq("停驻非冲突（conflicted 空）", run.status.conflicted, []);
+  wireCheck("rebaseRun", run);
+  const gitDirAbs = resolve(tmp, ".git");
+  check("rebase 态在场", existsSync(join(gitDirAbs, "rebase-merge")) || existsSync(join(gitDirAbs, "rebase-apply")));
+
+  const done = await core.continueMerge(tmp); // rebase 分派：git rebase --continue
+  eq("continue 后冲突清空", done.conflicted, []);
+  check("rebase 完成", !existsSync(join(gitDirAbs, "rebase-merge")) && !existsSync(join(gitDirAbs, "rebase-apply")));
+  wireCheck("mergeContinue", { status: done });
+  const log = await core.getLog(tmp, { maxCount: 10 });
+  eq("历史 = combined(a+b), c, initial", log.commits.map((c) => c.subject), ["add c", "add a", "initial commit"]);
+  const allMsg = (await runShell(tmp, ["git", "log", "--format=%B"])).stdout;
+  check("fixup 的 message 被忽略", !allMsg.includes("SHOULD NOT APPEAR"));
+});
+
+live("rebaseRun: 冲突 done=false → abortMerge（rebase 分派）中止 / 解决后 mergeContinue 完成（队列跨进程）", async (tmp) => {
+  await writeFile(join(tmp, "README.md"), "version A\n");
+  await runShell(tmp, ["git", "commit", "-am", "edit A"]);
+  await writeFile(join(tmp, "README.md"), "version B\n");
+  await runShell(tmp, ["git", "commit", "-am", "edit B"]);
+  await writeFile(join(tmp, "y.txt"), "y\n");
+  await runShell(tmp, ["git", "add", "y.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "side y"]);
+  const base = (await runShell(tmp, ["git", "rev-parse", "HEAD~3"])).stdout.trim();
+  const plan = await core.rebasePlan(tmp, base);
+  eq("plan 3 条", plan.entries.length, 3);
+  const [eA, eB, eC] = plan.entries;
+  const gitDirAbs = resolve(tmp, ".git");
+
+  // 阶段 1：reorder（pick B 跨过 A）必冲突 → abort 恢复
+  const run1 = await core.rebaseRun(tmp, base, [
+    { action: "pick", sha: eB.sha, subject: eB.subject },
+    { action: "drop", sha: eA.sha, subject: eA.subject },
+    { action: "drop", sha: eC.sha, subject: eC.subject },
+  ]);
+  eq("冲突 done=false", run1.done, false);
+  check("conflicted 非空", run1.status.conflicted.length > 0);
+  wireCheck("rebaseRun", run1);
+  const ab = await core.abortMerge(tmp);
+  eq("abort 后冲突清空", ab.conflicted, []);
+  wireCheck("mergeAbort", { status: ab });
+  check("abort 后 rebase 态清除", !existsSync(join(gitDirAbs, "rebase-merge")));
+  eq("历史恢复原样", (await core.getLog(tmp, { maxCount: 10 })).commits.map((c) => c.subject),
+    ["side y", "edit B", "edit A", "initial commit"]);
+
+  // 阶段 2：同冲突 + 后随 squash（带 message）→ 解决 → mergeContinue →
+  // squash 步骤的消息队列在 continue 进程里重新挂载并生效
+  const run2 = await core.rebaseRun(tmp, base, [
+    { action: "pick", sha: eB.sha, subject: eB.subject },
+    { action: "drop", sha: eA.sha, subject: eA.subject },
+    { action: "squash", sha: eC.sha, subject: eC.subject, message: "MSG AFTER CONFLICT" },
+  ]);
+  eq("再次冲突 done=false", run2.done, false);
+  await writeFile(join(tmp, "README.md"), "resolved\n");
+  await runShell(tmp, ["git", "add", "README.md"]);
+  const done = await core.continueMerge(tmp);
+  eq("continue 后冲突清空", done.conflicted, []);
+  check("rebase 完成", !existsSync(join(gitDirAbs, "rebase-merge")));
+  const log = await core.getLog(tmp, { maxCount: 5 });
+  eq("squash 消息跨进程生效", log.commits[0].subject, "MSG AFTER CONFLICT");
+  check("squash 合并了 y.txt", existsSync(join(tmp, "y.txt")));
+  const resolved = (await readFile(join(tmp, "README.md"), "utf8")).replace(/\r\n/g, "\n");
+  eq("解决内容保留", resolved, "resolved\n");
+});
+
+live("fixupCommit: fixup / squash+message / 冲突路径", async (tmp) => {
+  await writeFile(join(tmp, "x.txt"), "line1\nline2\nline3\n");
+  await runShell(tmp, ["git", "add", "x.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "add x"]);
+  await writeFile(join(tmp, "x.txt"), "line1\nCHANGED2\nline3\n");
+  await runShell(tmp, ["git", "commit", "-am", "edit x middle"]);
+  await writeFile(join(tmp, "y.txt"), "y\n");
+  await runShell(tmp, ["git", "add", "y.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "add y"]);
+
+  // 1) fixup 模式（非冲突）：x.txt 顶部加行 → 并入 "add x"（不同区域，重放干净）
+  const shaAddX = (await runShell(tmp, ["git", "rev-parse", "HEAD~2"])).stdout.trim();
+  await writeFile(join(tmp, "x.txt"), "line0\nline1\nCHANGED2\nline3\n");
+  await runShell(tmp, ["git", "add", "x.txt"]);
+  const r1 = await core.fixupCommit(tmp, shaAddX, "fixup", "IGNORED MSG");
+  eq("fixup done=true", r1.done, true);
+  wireCheck("fixupCommit", r1);
+  const log1 = (await runShell(tmp, ["git", "log", "--format=%s"])).stdout.trim().split("\n");
+  // initial + add x(合并 fixup) + edit x middle + add y = 4 条（fixup 并入目标、总数不变）
+  eq("fixup 合并后总数不变 4 条", log1.length, 4);
+  eq("合并进目标提交 add x", log1[2], "add x");
+  check("fixup message 被忽略", !(await runShell(tmp, ["git", "log", "--format=%B"])).stdout.includes("IGNORED MSG"));
+
+  // 2) squash+message（提交信息替换）
+  const shaAddY = (await runShell(tmp, ["git", "rev-parse", "HEAD"])).stdout.trim();
+  await writeFile(join(tmp, "y.txt"), "y-fixed\n");
+  await runShell(tmp, ["git", "add", "y.txt"]);
+  const r2 = await core.fixupCommit(tmp, shaAddY, "squash", "SQUASH FIXUP MSG");
+  eq("squash done=true", r2.done, true);
+  wireCheck("fixupCommit", r2);
+  const headMsg = (await runShell(tmp, ["git", "log", "-1", "--format=%s"])).stdout.trim();
+  eq("squash+message 替换合并信息", headMsg, "SQUASH FIXUP MSG");
+  eq("squash 合并后总数不变 4 条", (await runShell(tmp, ["git", "log", "--format=%s"])).stdout.trim().split("\n").length, 4);
+
+  // 3) 冲突路径：fixup 更早提交的同一区域 → autosquash 冲突
+  const shaAddX2 = (await runShell(tmp, ["git", "rev-parse", "HEAD~2"])).stdout.trim();
+  await writeFile(join(tmp, "x.txt"), "line0\nline1\nCONFLICT2\nline3\n");
+  await runShell(tmp, ["git", "add", "x.txt"]);
+  const r3 = await core.fixupCommit(tmp, shaAddX2, "fixup", null);
+  eq("冲突路径 done=false", r3.done, false);
+  check("conflicted 非空", r3.status.conflicted.length > 0);
+  wireCheck("fixupCommit", r3);
+  await core.abortMerge(tmp);
+  check("abort 后干净", (await core.getStatus(tmp)).conflicted.length === 0);
+});
+
+live("rebaseBranch: 干净 + 冲突（done/status 契约）", async (tmp) => {
+  // 干净：feat 提交独立文件，main 前进独立文件 → rebase 到 main 之上
+  await runShell(tmp, ["git", "checkout", "-b", "feat"]);
+  await writeFile(join(tmp, "f.txt"), "f\n");
+  await runShell(tmp, ["git", "add", "f.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "feat f"]);
+  await runShell(tmp, ["git", "checkout", "main"]);
+  await writeFile(join(tmp, "m.txt"), "m\n");
+  await runShell(tmp, ["git", "add", "m.txt"]);
+  await runShell(tmp, ["git", "commit", "-m", "main m"]);
+  await runShell(tmp, ["git", "checkout", "feat"]);
+
+  const r1 = await core.rebaseBranch(tmp, "main");
+  eq("干净 done=true", r1.done, true);
+  eq("无冲突", r1.status.conflicted, []);
+  wireCheck("rebaseBranch", r1);
+  const subjects = (await core.getLog(tmp, { maxCount: 10 })).commits.map((c) => c.subject);
+  eq("feat 重放到 main 之上", subjects, ["feat f", "main m", "initial commit"]);
+  check("两文件共存", existsSync(join(tmp, "f.txt")) && existsSync(join(tmp, "m.txt")));
+
+  // 冲突：两边改 README 不同内容
+  await writeFile(join(tmp, "README.md"), "feat line\n");
+  await runShell(tmp, ["git", "commit", "-am", "feat edits README"]);
+  await runShell(tmp, ["git", "checkout", "main"]);
+  await writeFile(join(tmp, "README.md"), "main line\n");
+  await runShell(tmp, ["git", "commit", "-am", "main edits README"]);
+  await runShell(tmp, ["git", "checkout", "feat"]);
+
+  const r2 = await core.rebaseBranch(tmp, "main");
+  eq("冲突 done=false", r2.done, false);
+  check("conflicted 含 README.md", r2.status.conflicted.some((e) => e.path === "README.md"));
+  wireCheck("rebaseBranch", r2);
+  const gitDirAbs = resolve(tmp, ".git");
+  check("rebase 态在场", existsSync(join(gitDirAbs, "rebase-merge")) || existsSync(join(gitDirAbs, "rebase-apply")));
+  await core.abortMerge(tmp); // abortMerge rebase 分派第二例
+  check("abort 后 rebase 态清除", !existsSync(join(gitDirAbs, "rebase-merge")));
+  eq("abort 后无冲突", (await core.getStatus(tmp)).conflicted, []);
+});
+
+// ============================================================================
 // static check：index.js 与 typert.host.js 的 Remote 方法名集合一致
 // ============================================================================
 
@@ -1200,7 +2312,7 @@ test("static: index.js 与 typert.host.js 方法名集合一致", () => {
   eq("集合相等", a, b);
 });
 
-test("static: 29 个 Remote 方法在两边都存在", () => {
+test("static: 56 个 Remote 方法在两边都存在", () => {
   const indexSrc = readFileSync(join(__projectRoot, "index.js"), "utf8");
   const typertSrc = readFileSync(join(__projectRoot, "typert.host.js"), "utf8");
   const expected = [
@@ -1209,7 +2321,14 @@ test("static: 29 个 Remote 方法在两边都存在", () => {
     "checkout","branchDelete","branchRename","merge","mergeAbort","mergeContinue",
     "resolveConflict","fetch","pull","push","worktreeAdd","worktreeRemove",
     "worktreePrune","init","hunkApply","cherryPick",
+    // v2 §2.1/§2.2/§2.3
+    "stageHunk","stashList","stashPush","stashPop","stashApply","stashDrop","stashClear",
+    "tags","tagCreate","tagDelete","reset","revert","blame","diffRange","reflog",
+    "remoteAdd","remoteRemove","remoteRename","configList","configSet","configUnset",
+    // P3-A §8.1/§8.3
+    "rebasePlan","rebaseRun","fixupCommit","rebaseBranch","lineApply",
   ];
+  eq("方法总数 56", expected.length, 56);
   for (const m of expected) {
     check("index 含 " + m, indexSrc.includes('markRemoteMethod(this, "' + m + '"'));
     check("typert 含 " + m, typertSrc.includes('"' + m + '"'));
