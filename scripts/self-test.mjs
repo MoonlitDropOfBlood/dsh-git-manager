@@ -457,7 +457,12 @@ test("validateRepoPath: 仓库内相对/绝对路径通过并归一化；越界�
     check("posix 大小写敏感（root 换大小写判为越界）", throwsExit(() => core.validateRepoPath(root, root.toUpperCase())));
   }
   // 越界：.. 穿越 / 盘符外绝对路径 / 空路径 / 空 root
-  for (const bad of ["..", "../escape", "..\\escape", "a/../../escape", resolve(root, "..", "outside", "x.txt")]) {
+  // 「..\escape」只在 win32 构成穿越：POSIX 反斜杠是合法文件名字符（不是分隔符），
+  // 该平台上 resolve 后仍在 root 内 → 接受才是正确行为。此条 Windows 视角断言
+  // 曾在 Linux CI 上必挂（2026-10-13 v1.4.0 首次发版实测），故平台条件化。
+  const badPaths = ["..", "../escape", "a/../../escape", resolve(root, "..", "outside", "x.txt")];
+  if (process.platform === "win32") badPaths.splice(2, 0, "..\\escape");
+  for (const bad of badPaths) {
     check("越界拒绝: " + bad, throwsExit(() => core.validateRepoPath(root, bad)));
   }
   check("空路径拒绝", throwsExit(() => core.validateRepoPath(root, "")));
