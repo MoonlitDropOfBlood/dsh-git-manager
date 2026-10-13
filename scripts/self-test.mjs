@@ -2480,6 +2480,13 @@ async function makeSubFixture(root, opts = {}) {
   const initRepo = async (dir, file, content) => {
     await mkdir(dir, { recursive: true });
     await gitIn(dir, ["init", "-b", "main"]);
+    // repo 本地身份：fixture 提交走 gitIn（env 身份），但**产品代码**（runGit 继承
+    // process.env、无身份）在这些仓库里的 merge/cherry-pick 等提交路径需要身份；
+    // CI runner 无全局 user.name/email（v1.4.0 发版实测：gitlink 冲突测试的
+    // core.mergeBranch 报 "Committer identity unknown"）。env 身份不会传给产品
+    // 进程（gitIn 仅作用于自身调用），故这里必须配 repo 本地 config。
+    await gitIn(dir, ["config", "user.name", "sub-fixture"]);
+    await gitIn(dir, ["config", "user.email", "sub-fixture@example.com"]);
     await writeFile(join(dir, file), content);
     await gitIn(dir, ["add", "-A"]);
     await gitIn(dir, ["commit", "-qm", "init " + file]);
