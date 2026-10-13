@@ -100,6 +100,43 @@ window.__ModuleLoader__.load({
 .gm-file-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gm-file-old{color:var(--dsw-alias-label-tertiary);font-size:11px;margin-left:4px}
 
+/* 仓库切换器（分支 / 历史 / 冲突 / Worktree / 设置 Tab 顶部一行 chips） */
+.gm-repo-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.gm-repo-chip{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;max-width:240px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer;white-space:nowrap;flex:none}
+.gm-repo-chip:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.gm-repo-chip-active{background:var(--dsw-specific-sidebar-nav-item-active);border-color:transparent;color:var(--dsw-alias-label-primary);font-weight:500}
+.gm-repo-chip svg{flex:none}
+.gm-repo-chip-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gm-repo-chip-count{font-size:10px;line-height:14px;padding:0 5px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);flex:none}
+.gm-repo-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-error-primary);flex:none}
+
+/* 变更 Tab：按仓库分组的文件列表（子仓库支持 P0） */
+.gm-repogroup{margin-top:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
+.gm-repogroup-head{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--dsw-alias-bg-layer-1);font-size:12px}
+.gm-repogroup-head>svg{flex:none;color:var(--dsw-alias-label-secondary)}
+.gm-repogroup-name{font-weight:500;color:var(--dsw-alias-label-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gm-repogroup-rel{font-size:11px;color:var(--dsw-alias-label-tertiary);font-family:ui-monospace,monospace;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gm-repogroup-branch{font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none}
+.gm-repogroup-counts{font-size:11px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,monospace;flex:none}
+.gm-repogroup-body{padding:4px 4px 8px}
+.gm-sub-badge{font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;white-space:nowrap;flex:none}
+.gm-sub-badge-warn{background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-state-warn-label)}
+.gm-sub-badge-error{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 15%,transparent);color:var(--dsw-alias-state-error-primary)}
+.gm-sub-badge-mute{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-tertiary)}
+.gm-sub-badge-ok{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 15%,transparent);color:var(--dsw-alias-state-success-primary)}
+.gm-mini-weak{opacity:.6}
+.gm-mini-weak:hover{opacity:1}
+.gm-notice-warn{padding:8px 14px;border-radius:8px;background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-state-warn-label);font-size:12px;margin-bottom:10px;white-space:pre-wrap}
+
+/* 设置 Tab「子仓库」管理区（submodule 管理，P2） */
+.gm-sub-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:12px}
+.gm-sub-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.gm-sub-row-name{flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary)}
+.gm-sub-row-rel{flex:none;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-family:ui-monospace,monospace;color:var(--dsw-alias-label-tertiary)}
+.gm-sub-row-meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-tertiary)}
+.gm-sub-row-actions{flex:none;display:flex;align-items:center;gap:6px}
+.gm-sub-group-hint{font-size:11px;color:var(--dsw-alias-label-tertiary);padding:2px 2px 4px}
+
 /* Diff view */
 .gm-diff{background:var(--dsw-alias-bg-layer-1);border-radius:10px;padding:10px 14px;margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px;overflow-x:auto;max-height:60vh}
 .gm-diff-file{padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}
@@ -221,6 +258,14 @@ window.__ModuleLoader__.load({
       "reset","revert","blame","diffRange","reflog",
       "remoteAdd","remoteRemove","remoteRename","configList","configSet","configUnset",
       "rebasePlan","rebaseRun","fixupCommit","rebaseBranch","lineApply",
+      // 子仓库支持（契约 docs/plans/2026-10-13-subrepo-support.md §2.2，P0）
+      "repoTree",
+      // 子仓库支持 P1（§3.6）：子模块指针提交是否在子仓库当前对象库中
+      "revExists",
+      // 子仓库支持 P2（§7 P2 / 方案 §2.2）：submodule 管理五件套
+      // （init / update / sync / deinit / add——设置 Tab「子仓库」管理区、
+      //   变更 Tab 未初始化组头「初始化」、nested → submodule 注册共用）
+      "submoduleInit","submoduleUpdate","submoduleSync","submoduleDeinit","submoduleAdd",
     ];
     const CLIENT_REMOTE = {
       package: "dsh-git-manager",
@@ -823,6 +868,96 @@ window.__ModuleLoader__.load({
     }
 
     // ============================================================================
+    // 子仓库支持（契约 docs/plans/2026-10-13-subrepo-support.md §3，P0）
+    //   RepoSwitcher：分支 / 历史 / 冲突 / Worktree / 设置 Tab 顶部的仓库切换 chips。
+    //   repos 为空或只有 1 个节点时不渲染（单仓库时无意义）。
+    // ============================================================================
+    const REPO_KIND_LABEL = { root: "主仓库", submodule: "子模块（submodule）", nested: "嵌套独立仓库" };
+
+    // 仓库类型图标（内联 SVG，stroke=currentColor；submodule=链接、nested/root=文件夹）
+    function repoKindIcon(kind) {
+      const common = {
+        width: 13, height: 13, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+        strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true,
+      };
+      if (kind === "submodule") {
+        return React.createElement("svg", common,
+          React.createElement("path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.71 1.71" }),
+          React.createElement("path", { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }),
+        );
+      }
+      if (kind === "nested") {
+        return React.createElement("svg", common,
+          React.createElement("path", { d: "M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z" }),
+        );
+      }
+      return React.createElement("svg", common,
+        React.createElement("path", { d: "M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z" }),
+        React.createElement("circle", { cx: 9, cy: 13, r: 1.5 }),
+        React.createElement("circle", { cx: 15, cy: 15, r: 1.5 }),
+        React.createElement("path", { d: "m10.3 13.6 3.4 1.1" }),
+      );
+    }
+
+    // RepoNode.dirty 的合计（缺失字段按 0 计，Host 契约里四个计数恒为数字）
+    function repoDirtyTotal(d) {
+      const x = d || {};
+      return (x.staged || 0) + (x.unstaged || 0) + (x.untracked || 0);
+    }
+
+    // 分组顺序：root 在最上，其余按 relPath 字典序
+    function orderRepoNodes(list) {
+      const all = Array.isArray(list) ? list.slice() : [];
+      if (all.length === 0) return all;
+      const root = all.find((n) => n && ((n.kind === "root") || !n.relPath)) || all[0];
+      const rest = all.filter((n) => n && n !== root)
+        .sort((a, b) => String(a.relPath || "").localeCompare(String(b.relPath || "")));
+      return [root].concat(rest);
+    }
+
+    // RepoNode 的 submodule 状态徽标（变更 Tab 组头与设置 Tab「子仓库」管理区共用，
+    // 复用 .gm-sub-badge 系列色板）。node.error 优先——查询失败时不做状态推断。
+    function repoNodeBadge(node) {
+      if (!node) return null;
+      if (node.error) return { t: "查询失败", c: "gm-sub-badge-error" };
+      if (node.initialized === false) return { t: "未初始化", c: "gm-sub-badge-mute" };
+      if (node.submodule && node.submodule.state === "pointer-mismatch") return { t: "指针不符", c: "gm-sub-badge-warn" };
+      if (node.submodule && node.submodule.state === "conflict") return { t: "冲突", c: "gm-sub-badge-error" };
+      return null;
+    }
+
+    function RepoSwitcher(props) {
+      const repos = Array.isArray(props.repos) ? props.repos : [];
+      if (repos.length <= 1) return null;
+      return React.createElement("div", { className: "gm-repo-bar", role: "group", "aria-label": "仓库切换" },
+        repos.map((n) => {
+          const total = repoDirtyTotal(n.dirty);
+          const conflicted = (n.dirty && n.dirty.conflicted) || 0;
+          const active = props.activeRepoId === n.id;
+          return React.createElement("button", {
+            key: n.id,
+            type: "button",
+            className: "gm-repo-chip" + (active ? " gm-repo-chip-active" : ""),
+            title: (n.relPath ? n.relPath : n.path)
+              + "\n" + (REPO_KIND_LABEL[n.kind] || String(n.kind || "仓库"))
+              + (n.branch ? "\n分支：" + n.branch : "")
+              + (n.initialized === false ? "\n未初始化" : "")
+              + (n.error ? "\n状态查询失败：" + n.error : "")
+              + "\n点击切换该仓库（其余 Tab 全部作用于它）",
+            onClick: () => props.setActiveRepoId(n.id),
+          },
+            repoKindIcon(n.kind),
+            React.createElement("span", { className: "gm-repo-chip-name" },
+              n.kind === "root" ? ("主仓库" + (n.name ? " · " + n.name : "")) : (n.name || n.relPath || "仓库")),
+            n.initialized === false ? React.createElement("span", { className: "gm-sub-badge gm-sub-badge-mute" }, "未初始化") : null,
+            total > 0 ? React.createElement("span", { className: "gm-repo-chip-count" }, String(total)) : null,
+            conflicted > 0 ? React.createElement("span", { className: "gm-repo-dot" }) : null,
+          );
+        }),
+      );
+    }
+
+    // ============================================================================
     // GitPanel（六个 Tab 的内容；此处是壳）
     // ============================================================================
     function GitPanel(props) {
@@ -841,15 +976,65 @@ window.__ModuleLoader__.load({
       const [remotes, setRemotes] = React.useState([]);
       const [tab, setTab] = React.useState("changes");
       const [error, setError] = React.useState(null);
+      const [notice, setNotice] = React.useState(null);  // 头部批量操作的成功/部分失败汇总（P2）
       const [busy, setBusy] = React.useState(null); // 正在执行的操作标签
+      // 仓库树（子仓库支持 P0）：repos = repoTree 返回的 RepoNode[]，null = 未取到/失败
+      const [repos, setRepos] = React.useState(null);
 
-      // 重新选 repo 时探活
+      // 当前选中的子仓库。选择以 {root,id} 保存：repoPath 变化时 root 不匹配即派生为
+      // ""（= 重置回主仓库），这样 scopedRepoPath 会立刻回到 repoPath，不会多打一轮
+      // 旧仓库的请求，也不需要额外的 reset effect。
+      const [repoSel, setRepoSel] = React.useState({ root: "", id: "" });
+      const activeRepoId = repoSel.root === repoPath ? repoSel.id : "";
+      const setActiveRepoId = React.useCallback(
+        (id) => setRepoSel({ root: repoPath, id: (id === undefined || id === null) ? "" : String(id) }),
+        [repoPath],
+      );
+
+      // 跨 Tab 范围对比请求（P1 §3.6）：变更 Tab 的指针跳转按钮用它把
+      // 「在子仓库中查看 a..b」转成历史 Tab 的一次范围对比。
+      // nonce 递增保证同一对 sha 再点一次也能重新触发（effect 只认 nonce 变化）；
+      // requestRange(null) 是消费方回执——清空后手动切回历史 Tab 不会重复弹出旧对比。
+      const [rangeReq, setRangeReq] = React.useState(null); // { fromSha, toSha, nonce } | null
+      const rangeNonceRef = React.useRef(0);
+      const requestRange = React.useCallback((fromSha, toSha) => {
+        rangeNonceRef.current += 1;
+        if (!fromSha || !toSha) { setRangeReq(null); return; }
+        setRangeReq({ fromSha: String(fromSha), toSha: String(toSha), nonce: rangeNonceRef.current });
+      }, []);
+
+      // 仓库树拉取（非致命：失败只置 null，不打断面板）。供 effect 与 mutation 后刷新复用。
+      const refreshTree = React.useCallback(async () => {
+        if (!repoPath) { setRepos(null); return; }
+        try {
+          const r = await unwrap(await remote.repoTree({ path: repoPath }));
+          setRepos((r.ok && r.value && Array.isArray(r.value.repos)) ? r.value.repos : null);
+        } catch (_) {
+          setRepos(null);
+        }
+      }, [remote, repoPath]);
+
+      // activeRepo = 当前选中节点（找不到即 null → 所有操作回落到主仓库）
+      const activeRepo = (repos || []).find((n) => n && n.id === activeRepoId) || null;
+      const scopedRepoPath = (activeRepo && activeRepo.path) ? activeRepo.path : repoPath;
+
+      // 重新选 repo 时探活 + 并行拉仓库树（两者互不阻塞）
+      React.useEffect(() => {
+        refreshTree();
+      }, [refreshTree]);
+
+      // 重新选 repo 时探活（作用于当前作用域仓库 scopedRepoPath）
       React.useEffect(() => {
         let alive = true;
         async function probe1() {
-          if (!repoPath) { setProbe({ isRepo: false }); setStatus(null); setRemotes([]); return; }
+          if (!scopedRepoPath) { setProbe({ isRepo: false }); setStatus(null); setRemotes([]); return; }
           setError(null);
-          const r = await unwrap(await remote.overview({ path: repoPath }));
+          // 换仓库先清空上一个仓库的 status——头部徽标 / 横幅 / 冲突页都读它，
+          // 否则切换瞬间会短暂显示上一个仓库的 ahead/behind 与冲突。
+          // 批量 fetch/pull 的汇总 notice 同样属于那个仓库（面板级 P2）。
+          setStatus(null);
+          setNotice(null);
+          const r = await unwrap(await remote.overview({ path: scopedRepoPath }));
           if (!alive) return;
           if (r.ok) {
             setProbe(r.value.probe);
@@ -865,15 +1050,19 @@ window.__ModuleLoader__.load({
         return () => { alive = false; };
       }, [repoPath]);
 
-      // 15s 静默轮询
+      // 15s 静默轮询（作用域仓库）
+      // P1 §3.3：仓库树一起刷——六 Tab 徽标与切换器红点是对**所有仓库** dirty 的求和，
+      // 只刷作用域仓库的 status 时其他仓库的徽标会一直停在上次快照（Host 侧 repoTree
+      // 有 60s 缓存，这里的额外调用基本命中缓存）。
       React.useEffect(() => {
         if (!probe || !probe.isRepo) return;
         const t = setInterval(async () => {
-          const r = await unwrap(await remote.status({ path: repoPath }));
+          const r = await unwrap(await remote.status({ path: scopedRepoPath }));
           if (r.ok) setStatus(r.value);
+          refreshTree();
         }, 15000);
         return () => clearInterval(t);
-      }, [probe && probe.isRepo, repoPath]);
+      }, [probe && probe.isRepo, scopedRepoPath, refreshTree, remote]);
 
       // 通用 mutation 包装
       const act = async (label, fn) => {
@@ -889,9 +1078,53 @@ window.__ModuleLoader__.load({
         } finally { setBusy(null); }
       };
 
+      // P2：全部仓库批量 fetch / pull（契约 §3.5）——等价于 `git submodule foreach`
+      // 的语义，逐仓库串行调用现有 fetch/pull：单个仓库失败不中断其余（收集失败仓库名），
+      // 结束后一次性汇总。全失败走现有错误条（没有成功的部分可展示）。
+      // 作用域：repos 里 initialized 的全部节点（含 root）；pull 跳过 detached /
+      // 尚无提交的仓库（那类仓库没有可 pull 的分支，git 也会直接报错）。
+      const bulkRemote = async (kind) => {
+        const label = kind === "fetch" ? "Fetch 全部" : "Pull 全部";
+        const nodes = (Array.isArray(repos) ? repos : [])
+          .filter((n) => n && n.path && n.initialized !== false && !(kind === "pull" && (n.detached || n.unborn)));
+        if (nodes.length === 0) { setNotice(label + "：没有已初始化的仓库可操作。"); return; }
+        setBusy(label); setError(null); setNotice(null);
+        const okNames = [], failNames = [];
+        try {
+          for (const n of nodes) {
+            let r;
+            try {
+              r = await unwrap(kind === "fetch" ? await remote.fetch({ path: n.path }) : await remote.pull({ path: n.path }));
+            } catch (_) { r = { ok: false }; }
+            const name = n.relPath || (n.kind === "root" ? ("主仓库" + (n.name ? " · " + n.name : "")) : (n.name || n.relPath));
+            if (r.ok) okNames.push(name); else failNames.push(name);
+          }
+          // 汇总：全失败走错误条；否则 notice（失败仓库名附在括号里）
+          const verb = kind === "fetch" ? "Fetch" : "Pull";
+          if (okNames.length === 0) {
+            setError(verb + " 全部失败：" + failNames.join("、"));
+          } else if (failNames.length > 0) {
+            setNotice(verb + " 完成：成功 " + okNames.length + "，失败 " + failNames.length + "（" + failNames.join("、") + "）");
+          } else {
+            setNotice(verb + " 完成：成功 " + okNames.length + " 个");
+          }
+        } finally {
+          setBusy(null);
+        }
+        // 收尾：仓库树徽标 + 作用域仓库 status（批量操作可能让 ahead/behind 变化）
+        try { refreshTree(); } catch (_) { /* 忽略 */ }
+        try {
+          const s = await unwrap(await remote.status({ path: scopedRepoPath }));
+          if (s.ok && s.value) setStatus(s.value);
+        } catch (_) { /* 忽略：15s 轮询会自愈 */ }
+      };
+
       const head = React.createElement("div", { className: "gm-head" },
         React.createElement("span", { className: "gm-head-title" }, "Git 管理"),
-        React.createElement("span", { className: "gm-head-path", title: repoPath }, repoPath),
+        React.createElement("span", {
+          className: "gm-head-path",
+          title: scopedRepoPath === repoPath ? repoPath : (repoPath + "\n→ 当前仓库：" + scopedRepoPath),
+        }, scopedRepoPath),
         React.createElement("span", { className: "gm-head-spacer" }),
         React.createElement("div", { className: "gm-head-actions" },
           status && probe && !probe.detached && (status.ahead > 0 || status.behind > 0) ? React.createElement("span", { className: "gm-badge", style: { fontSize: 12 }, title: "与远端的差距：↑ 本地领先提交数，↓ 本地落后提交数" },
@@ -899,9 +1132,26 @@ window.__ModuleLoader__.load({
             status.ahead > 0 && status.behind > 0 ? " " : null,
             status.behind > 0 ? React.createElement("span", { className: "gm-badge-behind" }, "↓" + status.behind) : null,
           ) : null,
-          React.createElement("button", { className: "gm-btn", onClick: async () => { const r = await unwrap(await remote.fetch({ path: repoPath })); if (!r.ok) setError(r.error.message); else { setStatus(r.value.status); setRemotes(r.value.remotes || remotes); } }, disabled: !!busy }, "Fetch"),
-          React.createElement("button", { className: "gm-btn", onClick: async () => { const r = await act("Pull", () => remote.pull({ path: repoPath })); }, disabled: !!busy }, "Pull"),
-          React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: async () => { const r = await act("Push", () => remote.push({ path: repoPath })); }, disabled: !!busy }, "Push"),
+          React.createElement("button", { className: "gm-btn", onClick: async () => { const r = await unwrap(await remote.fetch({ path: scopedRepoPath })); if (!r.ok) setError(r.error.message); else { setStatus(r.value.status); setRemotes(r.value.remotes || remotes); refreshTree(); } }, disabled: !!busy }, "Fetch"),
+          React.createElement("button", { className: "gm-btn", onClick: async () => { await act("Pull", () => remote.pull({ path: scopedRepoPath })); refreshTree(); }, disabled: !!busy }, "Pull"),
+          React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: async () => { await act("Push", () => remote.push({ path: scopedRepoPath })); refreshTree(); }, disabled: !!busy }, "Push"),
+          // P2：多仓库时的批量 fetch / pull（单仓库时无意义，不渲染）
+          Array.isArray(repos) && repos.length > 1
+            ? React.createElement("button", {
+                className: "gm-mini",
+                disabled: !!busy,
+                title: "对所有已初始化的仓库（含主仓库）串行执行 git fetch；单个仓库失败不中断其余",
+                onClick: () => bulkRemote("fetch"),
+              }, busy === "Fetch 全部" ? "Fetch 全部…" : "Fetch 全部")
+            : null,
+          Array.isArray(repos) && repos.length > 1
+            ? React.createElement("button", {
+                className: "gm-mini",
+                disabled: !!busy,
+                title: "对所有已初始化的仓库串行执行 git pull（detached / 尚无提交的仓库自动跳过）；单个仓库失败不中断其余",
+                onClick: () => bulkRemote("pull"),
+              }, busy === "Pull 全部" ? "Pull 全部…" : "Pull 全部")
+            : null,
           React.createElement("button", { className: "gm-btn gm-btn-icon", onClick: () => setOpen(false), title: "关闭（Esc）", "aria-label": "关闭 Git 管理面板" },
             React.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", "aria-hidden": true },
               React.createElement("path", { d: "M18 6 6 18" }),
@@ -920,10 +1170,11 @@ window.__ModuleLoader__.load({
               className: "gm-btn gm-btn-primary",
               disabled: !!busy,
               onClick: async () => {
-                const r = await unwrap(await remote.init({ path: repoPath }));
+                const r = await unwrap(await remote.init({ path: scopedRepoPath }));
                 if (r.ok) {
                   setProbe(r.value.probe);
                   setStatus(null);
+                  refreshTree();
                 } else {
                   setError(r.error.message || r.error.code);
                 }
@@ -934,8 +1185,8 @@ window.__ModuleLoader__.load({
         if (status && status.merging) {
           return React.createElement("div", { className: "gm-banner" },
             React.createElement("span", null, "⚠ 合并进行中"),
-            React.createElement("button", { className: "gm-btn", disabled: !!busy, onClick: async () => { const r = await act("mergeContinue", () => remote.mergeContinue({ path: repoPath })); if (r && r.value && r.value.status) setStatus(r.value.status); } }, "继续"),
-            React.createElement("button", { className: "gm-btn gm-btn-danger", disabled: !!busy, onClick: async () => { await act("mergeAbort", () => remote.mergeAbort({ path: repoPath })); setTab("conflicts"); } }, "中止"),
+            React.createElement("button", { className: "gm-btn", disabled: !!busy, onClick: async () => { const r = await act("mergeContinue", () => remote.mergeContinue({ path: scopedRepoPath })); if (r && r.value && r.value.status) setStatus(r.value.status); refreshTree(); } }, "继续"),
+            React.createElement("button", { className: "gm-btn gm-btn-danger", disabled: !!busy, onClick: async () => { await act("mergeAbort", () => remote.mergeAbort({ path: scopedRepoPath })); setTab("conflicts"); refreshTree(); } }, "中止"),
           );
         }
         if (status && status.rebasing) {
@@ -946,7 +1197,14 @@ window.__ModuleLoader__.load({
         return null;
       })();
 
-      const conflictedCount = (status && status.conflicted) ? status.conflicted.length : 0;
+      // 六 Tab 徽标：仓库树可用时聚合所有节点的 dirty 计数，否则回落到当前 status
+      const hasTree = Array.isArray(repos) && repos.length > 0;
+      const conflictedCount = hasTree
+        ? repos.reduce((n, x) => n + ((x && x.dirty && x.dirty.conflicted) || 0), 0)
+        : ((status && status.conflicted) ? status.conflicted.length : 0);
+      const changesCount = hasTree
+        ? repos.reduce((n, x) => n + repoDirtyTotal(x && x.dirty), 0)
+        : (status ? (status.staged.length + status.unstaged.length + status.untracked.length) : 0);
 
       const tabNav = React.createElement("nav", { className: "gm-tabs" },
         [
@@ -963,7 +1221,7 @@ window.__ModuleLoader__.load({
           onClick: () => setTab(k),
         },
           label,
-          k === "changes" && status && (status.staged.length + status.unstaged.length + status.untracked.length) > 0 ? React.createElement("span", { className: "gm-tab-badge" }, String(status.staged.length + status.unstaged.length + status.untracked.length)) : null,
+          k === "changes" && changesCount > 0 ? React.createElement("span", { className: "gm-tab-badge" }, String(changesCount)) : null,
           k === "conflicts" && conflictedCount > 0 ? React.createElement("span", { className: "gm-tab-badge" }, String(conflictedCount)) : null,
         )),
       );
@@ -984,7 +1242,16 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const tabProps = { remote, repoPath, probe, status, busy, act, setError, onStatus: setStatus, onSwitchTab: setTab, registerWorkspace };
+      // 仓库切换器（分支 / 历史 / 冲突 / Worktree / 设置 Tab 顶部；变更 Tab 自带分组视图，不重复渲染）
+      const repoBar = (tab === "changes" || !hasTree) ? null : React.createElement(RepoSwitcher, {
+        repos,
+        activeRepoId,
+        setActiveRepoId,
+      });
+
+      // 六 Tab 的 repoPath 换源：作用域仓库（选中子仓库时它的 toplevel）——现有全部
+      // remote.*({path: repoPath}) 调用点无需改写逻辑，只换值来源（契约 §3.1）。
+      const tabProps = { remote, repoPath: scopedRepoPath, rootRepoPath: repoPath, repos, activeRepo, setActiveRepoId, refreshTree, probe, status, busy, act, setError, onStatus: setStatus, onSwitchTab: setTab, registerWorkspace, rangeReq, requestRange };
       const tabContent = (() => {
         if (!probe || !probe.isRepo) {
           return React.createElement("div", { className: "gm-empty" }, "该目录不是 Git 仓库。点击上方「初始化为 git 仓库」开始，或选择其他目录。");
@@ -1009,6 +1276,8 @@ window.__ModuleLoader__.load({
           tabNav,
           React.createElement("div", { className: "gm-content" },
             errBar,
+            notice ? React.createElement("div", { className: "gm-notice" }, notice) : null,
+            repoBar,
             tabContent,
           ),
         ),
@@ -1017,6 +1286,7 @@ window.__ModuleLoader__.load({
 
     // ============================================================================
     // ChangesTab（提交框 / 暂存全部 / hunk 级操作 / Stash 区）
+    //   子仓库支持 P0：按仓库分组的文件列表，组内一切操作作用于该组仓库自己的 toplevel。
     // ============================================================================
     const SCOPE_LABEL = {
       worktree: "未暂存（工作区 vs 暂存区）",
@@ -1024,16 +1294,74 @@ window.__ModuleLoader__.load({
       untracked: "未跟踪（完整内容）",
     };
 
+    // ---- 子仓库聚合辅助（契约 §3.2，纯函数，bundle 作用域） ----
+    // porcelain v2 <sub> 字段（Host 透传为 entry.subState）——4 字符位置型标志，
+    // '.' 为空位：pos1 S=子模块有状态差异（恒 S）、pos2 C=子仓库 HEAD≠index 记录
+    // 指针（未暂存指针不符）、pos3 M=已跟踪内容被修改、pos4 U=有未跟踪内容。
+    // 实测样本：S..U / S.M. / SC.. / S...（AGENTS.md 实测纪律：不猜文档字面）。
+    // 按标志位集合解码，未知串回落原始展示；普通文件恒为 "N..."，Host 侧已过滤。
+    function subStateLabels(sub) {
+      const flags = [];
+      if (typeof sub === "string" && sub.length > 0) {
+        if (sub.indexOf("C") >= 0) flags.push("指针不符");
+        if (sub.indexOf("M") >= 0) flags.push("内容已修改");
+        if (sub.indexOf("U") >= 0) flags.push("有未跟踪内容");
+      }
+      return flags;
+    }
+    function shortSha(s) { return (s || "").slice(0, 7) || "—"; }
+    // 统一成 posix、无尾斜杠（git 的未跟踪目录是 "dir/"，relPath 是 "dir"）
+    function normalizeRel(p) {
+      return String(p === undefined || p === null ? "" : p).replace(/\\/g, "/").replace(/\/+$/, "");
+    }
+    // 子模块条目徽标：优先 gitlink（指针 a→b），其次 subState 语义
+    function subBadgeOf(entry) {
+      if (entry && entry.gitlink && (entry.gitlink.fromSha || entry.gitlink.toSha)) {
+        return { text: "指针 " + shortSha(entry.gitlink.fromSha) + " → " + shortSha(entry.gitlink.toSha), cls: "gm-sub-badge-warn" };
+      }
+      if (entry && entry.subState) {
+        const flags = subStateLabels(entry.subState);
+        return { text: flags.length > 0 ? flags.join("、") : ("子模块 " + entry.subState), cls: "gm-sub-badge-warn" };
+      }
+      return null;
+    }
+    // 子模块条目的指针信息（契约 §3.6）：优先已暂存的指针变更 entry.gitlink
+    // （hH 旧 → hI 新），其次未暂存漂移（子节点 submodule.sha vs recordedSha）。
+    // recordedSha 为空（指针从未记录）→ 无可跳转指针，返回 null。
+    // subId / subPath = 命中的子仓库节点（id 与绝对 path，revExists 与切作用域都用它）。
+    function subPointerOf(entry, child) {
+      const node = child || null;
+      const wrap = (fromSha, toSha) => ({
+        fromSha: fromSha,
+        toSha: toSha,
+        subId: node ? node.id : "",
+        subPath: node ? (node.path || "") : "",
+      });
+      if (entry && entry.gitlink && entry.gitlink.fromSha && entry.gitlink.toSha) {
+        return wrap(entry.gitlink.fromSha, entry.gitlink.toSha);
+      }
+      const sm = node && node.submodule;
+      if (sm && sm.recordedSha && sm.sha && sm.recordedSha !== sm.sha) {
+        return wrap(sm.recordedSha, sm.sha);
+      }
+      return null;
+    }
+
     function ChangesTab(props) {
       const remote = props.remote;
-      const repoPath = props.repoPath;
+      const repoPath = props.repoPath;                              // 作用域仓库（其余 Tab / stash / diff 默认）
+      const rootRepoPath = props.rootRepoPath || repoPath;           // 打开面板时的根仓库
+      const rootIsScoped = !repoPath || repoPath === rootRepoPath;
       const status = props.status;
       const act = props.act;
       const setError = props.setError;
-      const [diffWin, setDiffWin] = React.useState(null); // { file, scope, loading, text, truncated }
-      const [blameWin, setBlameWin] = React.useState(null); // { file, ref, loading, lines, truncated }
+      const refreshTree = props.refreshTree;
+      const repos = Array.isArray(props.repos) ? props.repos : null;
+
+      const [diffWin, setDiffWin] = React.useState(null); // { file, scope, repoPath, groupName, gitlink, ptr, loading, text, truncated }
+      const [blameWin, setBlameWin] = React.useState(null); // { file, ref, repoPath, groupName, loading, lines, truncated }
       const [lineSel, setLineSel] = React.useState(null); // { h, a, b }：diff 窗口内行级选择（hunk 内行下标）
-      const [fileHist, setFileHist] = React.useState(null); // { file, loading, entries }
+      const [fileHist, setFileHist] = React.useState(null); // { file, repoPath, loading, entries }
       const [histDiff, setHistDiff] = React.useState(null); // { title, sub, loading, text, truncated }
       const [confirming, setConfirming] = React.useState(null);
       const [hunkConfirm, setHunkConfirm] = React.useState(null); // { hunkIndex }（撤销此块，危险）
@@ -1044,23 +1372,189 @@ window.__ModuleLoader__.load({
       const [stashDlg, setStashDlg] = React.useState(false);
       const [stashMsg, setStashMsg] = React.useState("");
       const [stashUntracked, setStashUntracked] = React.useState(false);
+      // ---- 子仓库聚合 ----
+      const [groupStatus, setGroupStatus] = React.useState({});      // repoPath → status 结构（取不到为 null）
+      const [collapsed, setCollapsed] = React.useState(() => new Set()); // 默认全展开
+      const [commitRepoId, setCommitRepoId] = React.useState("");   // 提交框目标仓库（"" = root）
+      const [notice, setNotice] = React.useState(null);
 
-      // 点击文件 → 独立 diff 窗口（不再挤在列表旁边/下面）
-      const openDiff = async (file, scope) => {
+      // 分组列表：root 在最上，其余按 relPath 字典序；repos 不可用时退化为单组（= 作用域仓库）
+      const groupNodes = (repos && repos.length > 0)
+        ? orderRepoNodes(repos)
+        : [{ id: "", relPath: "", name: "主仓库", kind: "root", path: repoPath, dirty: null }];
+      const childNodes = groupNodes.filter((n) => n && n.relPath);
+      const nestedRels = childNodes.filter((n) => n.kind === "nested").map((n) => n.relPath);
+      const childNodeByRel = {};
+      childNodes.forEach((n) => { childNodeByRel[n.relPath] = n; });
+      // 路径落在某个子仓库目录内（含正好相等）——用于 root 组的过滤与子模块行判定
+      const isChildPath = (p) => {
+        const s = normalizeRel(p);
+        if (!s) return false;
+        return childNodes.some((n) => s === n.relPath || s.indexOf(n.relPath + "/") === 0);
+      };
+      // 子模块行判定：subState / gitlink 命中，或路径命中某个子仓库（submodule / 已误暂存的 nested）
+      const isSubEntry = (entry) => {
+        if (!entry) return false;
+        if (entry.subState || entry.gitlink) return true;
+        return !!childNodeByRel[normalizeRel(entry.path)];
+      };
+
+      // ---- 组内 status 数据获取 ----
+      // root 组直接复用面板级 props.status（作用域为 root 时）——不双拉 root。
+      const statusFor = (node) => {
+        if (!node) return null;
+        if (!node.relPath && rootIsScoped) return status || null;
+        return groupStatus[node.path] || null;
+      };
+
+      const reloadRepo = React.useCallback(async (path) => {
+        if (!path) return;
+        try {
+          const r = await unwrap(await remote.status({ path }));
+          const v = (r.ok && r.value) ? r.value : null;
+          setGroupStatus((s) => Object.assign({}, s, { [path]: v }));
+        } catch (_) {
+          setGroupStatus((s) => Object.assign({}, s, { [path]: null }));
+        }
+      }, [remote]);
+
+      // 已拉过的路径不重复拉（fetchedRef 随根仓库切换重置）
+      const fetchedRef = React.useRef({});
+      React.useEffect(() => { fetchedRef.current = {}; }, [rootRepoPath]);
+
+      React.useEffect(() => {
+        if (!repos || repos.length <= 1) return undefined;
+        let alive = true;
+        const jobs = [];
+        orderRepoNodes(repos).forEach((n) => {
+          if (!n || !n.path) return;
+          // root 组：作用域为 root 时直接用面板级 props.status，不双拉；否则自己拉
+          if (!n.relPath && rootIsScoped) return;
+          if (n.relPath && n.initialized === false) return;   // 未初始化的子模块没有文件变更
+          if (fetchedRef.current[n.path]) return;
+          fetchedRef.current[n.path] = true;
+          jobs.push((async () => {
+            try {
+              const r = await unwrap(await remote.status({ path: n.path }));
+              if (!alive) return;
+              const v = (r.ok && r.value) ? r.value : null;
+              setGroupStatus((s) => (s[n.path] === v ? s : Object.assign({}, s, { [n.path]: v })));
+            } catch (_) {
+              if (alive) setGroupStatus((s) => Object.assign({}, s, { [n.path]: null }));
+            }
+          })());
+        });
+        return () => { alive = false; };
+      }, [repos, remote, rootIsScoped]);
+
+      // 非「面板级 status 覆盖范围」的仓库组静默轮询（面板 15s 轮询只覆盖作用域仓库）
+      React.useEffect(() => {
+        if (!repos || repos.length <= 1) return undefined;
+        const nodes = orderRepoNodes(repos).filter((n) => n && n.path
+          && (n.relPath ? n.initialized !== false : !rootIsScoped));
+        if (nodes.length === 0) return undefined;
+        const t = setInterval(() => { nodes.forEach((n) => { reloadRepo(n.path); }); }, 30000);
+        return () => clearInterval(t);
+      }, [repos, reloadRepo, rootIsScoped]);
+
+      // 本地 act：复用面板 act（busy / 错误条），成功后刷新该仓库 status + 仓库树。
+      // 面板 act 会把返回值里的 status 写进面板级 status——当操作仓库 ≠ 作用域仓库时，
+      // 那是「别的仓库的 status」，需立即重取作用域仓库 status 纠正。
+      const actRepo = async (label, path, fn) => {
+        const r = await act(label, fn);
+        if (r === undefined) return undefined;
+        if (path && path !== repoPath) {
+          try {
+            const s = await unwrap(await remote.status({ path: repoPath }));
+            if (s.ok && s.value && props.onStatus) props.onStatus(s.value);
+          } catch (_) { /* 忽略：面板 15s 轮询会自愈 */ }
+        }
+        await reloadRepo(path);
+        if (typeof refreshTree === "function") refreshTree();
+        return r;
+      };
+
+      // ---- 未初始化子模块：一键初始化并拉取（P2，契约 §3.2 / §5.2） ----
+      // `git submodule update --init --recursive <subPath>`：同时注册 url（init）
+      // 与首次克隆内容（update）；首次克隆走网络可能较慢（Host 180s 超时）。
+      // 成功后该组从「未初始化」变为正常分组、文件区出现。
+      const initSubmodule = async (node) => {
+        if (!node || !node.relPath || !rootRepoPath) return;
+        const r = await actRepo("submoduleUpdate", node.path,
+          () => remote.submoduleUpdate({ path: rootRepoPath, subPath: node.relPath, init: true, recursive: true }));
+        if (r === undefined) return;   // 失败：错误已在面板错误条原样展示
+        setNotice("已初始化子模块 " + (node.name || node.relPath));
+      };
+
+      // ---- 提交目标仓库（提交框 select） ----
+      const commitTargets = (repos || []).filter((n) => n && n.initialized !== false);
+      const commitNode = commitTargets.find((n) => n.id === commitRepoId) || null;
+      const commitPath = commitNode
+        ? commitNode.path
+        : ((repos && repos.length > 0) ? rootRepoPath : repoPath);
+      const commitLabel = commitNode ? commitNode.name : "主仓库";
+
+      // ---- diff / blame / 文件历史（全部带 scopePath 参数：按组仓库发请求） ----
+      // ptr：子模块行的指针信息 {fromSha,toSha,subId,subPath}（契约 §3.6），
+      // 非子模块行传 null——窗口头部据此显示「指针 a → b」与下钻按钮。
+      const openDiff = async (file, scope, dpath, groupName, isGitlink, ptr) => {
+        const dp = dpath || repoPath;
+        const gname = groupName || "";
+        const p = ptr || null;
         setLineSel(null);
-        setDiffWin({ file, scope, loading: true, text: "", truncated: false });
-        const r = await unwrap(await remote.diff({ path: repoPath, scope, file }));
+        setDiffWin({ file, scope, repoPath: dp, groupName: gname, gitlink: !!isGitlink, ptr: p, loading: true, text: "", truncated: false });
+        const r = await unwrap(await remote.diff({ path: dp, scope, file }));
         if (!r.ok) { setDiffWin(null); setError(r.error.message || r.error.code); return; }
-        setDiffWin({ file, scope, loading: false, text: r.value.text, truncated: r.value.truncated });
+        setDiffWin({ file, scope, repoPath: dp, groupName: gname, gitlink: !!isGitlink, ptr: p, loading: false, text: r.value.text, truncated: r.value.truncated });
       };
 
       const reloadDiff = async () => {
         if (!diffWin) return;
-        const d = await unwrap(await remote.diff({ path: repoPath, scope: diffWin.scope, file: diffWin.file }));
+        const d = await unwrap(await remote.diff({ path: diffWin.repoPath, scope: diffWin.scope, file: diffWin.file }));
         if (!d.ok) return;
         const empty = !d.value.text;
         setLineSel(null);
         setDiffWin((cur) => (cur ? (empty ? null : { ...cur, loading: false, text: d.value.text, truncated: d.value.truncated }) : cur));
+      };
+
+      // ---- 子仓库指针下钻（契约 §3.6） ----
+      // 打开的 diff 窗口带 ptr 时先问 Host「这两个指针提交在不在子仓库当前对象库里」
+      // （revExists）：任一不在（浅克隆 / 指针已前移）或请求失败 → 按钮禁用并解释原因。
+      const [ptrCheck, setPtrCheck] = React.useState(null); // { key, state: "checking"|"ok"|"missing", reason }
+      const ptr = diffWin ? (diffWin.ptr || null) : null;
+      const ptrKey = ptr ? (ptr.subPath + "|" + ptr.fromSha + "|" + ptr.toSha) : "";
+      React.useEffect(() => {
+        const p = diffWin && diffWin.ptr;
+        if (!p || !p.subPath || !p.fromSha || !p.toSha) { setPtrCheck(null); return undefined; }
+        const key = p.subPath + "|" + p.fromSha + "|" + p.toSha;
+        let alive = true;
+        setPtrCheck({ key, state: "checking", reason: "" });
+        (async () => {
+          let next = { key, state: "missing", reason: "指针提交不在该子仓库当前对象库（浅克隆或指针已前移）" };
+          try {
+            const r = await unwrap(await remote.revExists({ path: p.subPath, revs: [p.fromSha, p.toSha] }));
+            if (alive && r.ok) {
+              const checks = (r.value && Array.isArray(r.value.checks)) ? r.value.checks : [];
+              if (checks.length > 0 && checks.every((c) => c && c.ok === true)) next = { key, state: "ok", reason: "" };
+            }
+          } catch (_) { /* 保持 missing：核验失败不允许跳转 */ }
+          if (alive) setPtrCheck(next);
+        })();
+        return () => { alive = false; };
+      }, [ptrKey, remote, diffWin && diffWin.file, diffWin && diffWin.scope]);
+      const ptrState = ptr
+        ? (ptr.subPath
+            ? ((ptrCheck && ptrCheck.key === ptrKey) ? ptrCheck.state : "checking")
+            : "no-sub")   // gitlink 命中子节点以外的路径（嵌入仓库 / 未识别）→ 无法下钻
+        : null;
+      const ptrReason = (ptrCheck && ptrCheck.key === ptrKey) ? (ptrCheck.reason || "") : "";
+      // 跳转：切作用域仓库 → 切历史 Tab → 请求该范围对比（tabProps 穿参，无全局变量）。
+      const jumpToSubRange = () => {
+        const p = diffWin && diffWin.ptr;
+        if (!p || !p.subId || ptrState !== "ok") return;
+        if (props.setActiveRepoId) props.setActiveRepoId(p.subId);
+        if (props.onSwitchTab) props.onSwitchTab("history");
+        if (props.requestRange) props.requestRange(p.fromSha, p.toSha);
       };
 
       // ---- 行级选择（契约 §8.3）：点选 / shift 点选 → lineApply ----
@@ -1072,8 +1566,8 @@ window.__ModuleLoader__.load({
       };
       const applySelectedLines = async (mode) => {
         if (!lineSel || !diffWin) return;
-        const r = await act("lineApply", () => remote.lineApply({
-          path: repoPath,
+        const r = await actRepo("lineApply", diffWin.repoPath, () => remote.lineApply({
+          path: diffWin.repoPath,
           file: diffWin.file,
           scope: diffWin.scope === "staged" ? "staged" : "unstaged",
           hunkIndex: lineSel.h,
@@ -1084,7 +1578,7 @@ window.__ModuleLoader__.load({
         if (r === undefined) return;
         await reloadDiff();
       };
-      const lineBar = (diffWin && lineSel && (diffWin.scope === "worktree" || diffWin.scope === "staged"))
+      const lineBar = (diffWin && !diffWin.gitlink && lineSel && (diffWin.scope === "worktree" || diffWin.scope === "staged"))
         ? React.createElement("div", { className: "gm-linebar" },
             React.createElement("span", { className: "gm-meta" }, "已选 " + (Math.abs(lineSel.b - lineSel.a) + 1) + " 行"),
             diffWin.scope === "worktree" ? React.createElement("button", {
@@ -1110,42 +1604,46 @@ window.__ModuleLoader__.load({
         : null;
 
       // ---- 文件级历史（契约 §8.4）：log({file}) + 逐版本 diffRange ----
-      const openFileHist = async (file) => {
-        setFileHist({ file, loading: true, entries: [] });
-        const r = await unwrap(await remote.log({ path: repoPath, file, maxCount: 100 }));
+      const openFileHist = async (file, hpath) => {
+        const hp = hpath || repoPath;
+        setFileHist({ file, repoPath: hp, loading: true, entries: [] });
+        const r = await unwrap(await remote.log({ path: hp, file, maxCount: 100 }));
         if (!r.ok) { setFileHist(null); setError(r.error.message || r.error.code); return; }
-        setFileHist({ file, loading: false, entries: (r.value && r.value.commits) || [] });
+        setFileHist({ file, repoPath: hp, loading: false, entries: (r.value && r.value.commits) || [] });
       };
-      const openHistDiff = async (file, c) => {
+      const openHistDiff = async (file, c, hpath) => {
+        const hp = hpath || (fileHist ? fileHist.repoPath : repoPath);
         // 根提交（无父）用空树 sha 当 from（纯 hex，checkRev 放行）
         const from = (c.parents && c.parents.length > 0) ? (c.sha + "^") : EMPTY_TREE_SHA;
         setHistDiff({ file, c, title: file, sub: (c.short || "") + " " + (c.subject || ""), loading: true, text: "", truncated: false });
-        const r = await unwrap(await remote.diffRange({ path: repoPath, from, to: c.sha, file, kind: "patch" }));
+        const r = await unwrap(await remote.diffRange({ path: hp, from, to: c.sha, file, kind: "patch" }));
         if (!r.ok) { setHistDiff(null); setError(r.error.message || r.error.code); return; }
         setHistDiff({ file, c, title: file, sub: (c.short || "") + " " + (c.subject || ""), loading: false, text: r.value.text, truncated: r.value.truncated });
       };
 
       // 只读 blame 窗口（契约 §3.4b）：变更 Tab 未暂存/已暂存文件行入口
-      const openBlame = async (file, ref) => {
-        setBlameWin({ file, ref, loading: true, lines: [], truncated: false });
-        const req = { path: repoPath, file };
+      const openBlame = async (file, ref, bpath) => {
+        const bp = bpath || repoPath;
+        setBlameWin({ file, ref, repoPath: bp, loading: true, lines: [], truncated: false });
+        const req = { path: bp, file };
         if (ref) req.ref = ref;
         const r = await unwrap(await remote.blame(req));
         if (!r.ok) { setBlameWin(null); setError(r.error.message || r.error.code); return; }
-        setBlameWin({ file, ref, loading: false, lines: (r.value && r.value.lines) || [], truncated: !!(r.value && r.value.truncated) });
+        setBlameWin({ file, ref, repoPath: bp, loading: false, lines: (r.value && r.value.lines) || [], truncated: !!(r.value && r.value.truncated) });
       };
 
       // hunk 级操作：worktree=「暂存此块」（stageHunk，无确认）+「撤销此块」（危险，确认）；
       // staged=「取消暂存此块」（hunkApply，无确认，改动保留在工作区）。
+      // 子模块指针行（gitlink）没有 hunk 概念，diff 窗口不给这些操作。
       const stageHunk = async (hunkIndex) => {
         if (!diffWin) return;
-        const r = await act("stageHunk", () => remote.stageHunk({ path: repoPath, file: diffWin.file, hunkIndex }));
+        const r = await actRepo("stageHunk", diffWin.repoPath, () => remote.stageHunk({ path: diffWin.repoPath, file: diffWin.file, hunkIndex }));
         if (r === undefined) return;
         await reloadDiff();
       };
       const unstageHunk = async (hunkIndex) => {
         if (!diffWin) return;
-        const r = await act("hunkApply", () => remote.hunkApply({ path: repoPath, scope: "staged", file: diffWin.file, hunkIndex }));
+        const r = await actRepo("hunkApply", diffWin.repoPath, () => remote.hunkApply({ path: diffWin.repoPath, scope: "staged", file: diffWin.file, hunkIndex }));
         if (r === undefined) return;
         await reloadDiff();
       };
@@ -1153,20 +1651,20 @@ window.__ModuleLoader__.load({
         const c = hunkConfirm;
         setHunkConfirm(null);
         if (!c || !diffWin) return;
-        const r = await act("hunkApply", () => remote.hunkApply({ path: repoPath, scope: diffWin.scope, file: diffWin.file, hunkIndex: c.hunkIndex }));
+        const r = await actRepo("hunkApply", diffWin.repoPath, () => remote.hunkApply({ path: diffWin.repoPath, scope: diffWin.scope, file: diffWin.file, hunkIndex: c.hunkIndex }));
         if (r === undefined) return; // act 已把错误放进错误条
         await reloadDiff();
       };
 
       const hunkActions = [];
-      if (diffWin && diffWin.scope === "worktree") {
+      if (diffWin && !diffWin.gitlink && diffWin.scope === "worktree") {
         hunkActions.push({ label: "暂存此块", title: "把该代码块加入暂存区", danger: false, onClick: stageHunk });
         hunkActions.push({ label: "撤销此块", title: "丢弃该代码块在工作区的改动（恢复为暂存区版本）", danger: true, onClick: (j) => setHunkConfirm({ hunkIndex: j }) });
-      } else if (diffWin && diffWin.scope === "staged") {
+      } else if (diffWin && !diffWin.gitlink && diffWin.scope === "staged") {
         hunkActions.push({ label: "取消暂存此块", title: "把该代码块移出暂存区（改动保留在工作区，内容不丢）", danger: false, onClick: unstageHunk });
       }
 
-      // ---- stash ----
+      // ---- stash（跟随作用域仓库 repoPath，契约 §4） ----
       const loadStashes = async () => {
         try {
           const u = await unwrap(await remote.stashList({ path: repoPath }));
@@ -1191,12 +1689,14 @@ window.__ModuleLoader__.load({
         setStashOpen(true);
         if (r && r.stashes) setStashes(r.stashes); else await loadStashes();
         await refreshStatus();
+        if (typeof refreshTree === "function") refreshTree();
       };
       const doStashOp = async (label, fn, index) => {
         const r = await act(label, fn);
         if (r === undefined) return;
         if (r && r.stashes) setStashes(r.stashes); else await loadStashes();
         await refreshStatus();
+        if (typeof refreshTree === "function") refreshTree();
         // stash pop/apply 冲突（无 MERGE_HEAD）→ 记录来源并跳冲突页（契约 §3.5 分流）
         if ((label === "stashPop" || label === "stashApply")
           && r && r.status && r.status.conflicted && r.status.conflicted.length > 0
@@ -1207,50 +1707,157 @@ window.__ModuleLoader__.load({
         }
       };
 
-      // ---- 文件行 ----
-      const renderGroup = (label, entries, kind, scope) => {
+      // ---- 文件行（组内复用；scopePath = 该组仓库自己的 toplevel） ----
+      // opt: { sub:子模块行, weaked:弱化 diff/blame/历史, ptr:指针跳转信息, discardable, badge, badgeCls, onEnter }
+      const renderFileRow = (entry, scope, scopePath, groupName, opt) => {
+        const o = opt || {};
+        const kindClass = (entry.kind && ("gm-file-kind-" + entry.kind)) || "";
+        const isActive = !!(diffWin && diffWin.file === entry.path && diffWin.scope === scope && diffWin.repoPath === scopePath);
+        const weakCls = o.weaked ? " gm-mini-weak" : "";
+        const isStaged = scope === "staged";
+        const isWorktree = scope === "unstaged";
+        const isUntracked = scope === "untracked";
+        const where = groupName && groupName !== "主仓库" ? ("（仓库：" + groupName + "）") : "";
+        return React.createElement("div", {
+          key: entry.path,
+          className: "gm-file" + (isActive ? " gm-file-active" : ""),
+          title: "点击查看差异" + where,
+          onClick: () => openDiff(entry.path, scope, scopePath, groupName, !!o.sub, o.ptr || null),
+        },
+          React.createElement("span", { className: "gm-file-kind " + kindClass }, o.sub ? "sub" : (entry.kind || "new")),
+          React.createElement("span", { className: "gm-file-path" }, entry.path),
+          o.badge ? React.createElement("span", { className: "gm-sub-badge " + (o.badgeCls || "") }, o.badge) : null,
+          entry.oldPath ? React.createElement("span", { className: "gm-file-old" }, "← " + entry.oldPath) : null,
+          isStaged ? React.createElement("button", { className: "gm-mini", disabled: !!props.busy, onClick: (ev) => { ev.stopPropagation(); actRepo("unstage", scopePath, () => remote.unstage({ path: scopePath, files: [entry.path] })); } }, "取消暂存") : null,
+          isWorktree || isUntracked ? React.createElement("button", { className: "gm-mini", disabled: !!props.busy, onClick: (ev) => { ev.stopPropagation(); actRepo("stage", scopePath, () => remote.stage({ path: scopePath, files: [entry.path] })); } }, "暂存") : null,
+          o.onEnter ? React.createElement("button", { className: "gm-mini", title: "把面板作用域切到该子仓库（其余 Tab 一并跟随）", onClick: (ev) => { ev.stopPropagation(); o.onEnter(); } }, "进入") : null,
+          isStaged || isWorktree ? React.createElement("button", {
+            className: "gm-mini" + weakCls,
+            title: o.weaked ? "子模块指针条目：这里显示的是指针差异，不是文本内容" : "逐行追溯（blame）该文件",
+            onClick: (ev) => { ev.stopPropagation(); openBlame(entry.path, null, scopePath); },
+          }, "Blame") : null,
+          isStaged || isWorktree ? React.createElement("button", {
+            className: "gm-mini" + weakCls,
+            title: "该文件的提交历史",
+            onClick: (ev) => { ev.stopPropagation(); openFileHist(entry.path, scopePath); },
+          }, "历史") : null,
+          (isStaged || isWorktree || isUntracked) && o.discardable !== false ? React.createElement("button", {
+            className: "gm-mini gm-mini-danger",
+            disabled: !!props.busy,
+            onClick: (ev) => { ev.stopPropagation(); setConfirming({ kind: "discard", entry, scope, repoPath: scopePath, repoName: groupName }); },
+          }, isUntracked ? "删除" : "丢弃") : null,
+        );
+      };
+
+      // ---- scope 子组（Staged / Unstaged / Untracked） ----
+      const renderScopeGroup = (label, entries, kind, scope, node) => {
         if (!entries || entries.length === 0) return null;
+        const scopePath = node.path;
+        const groupName = node.relPath ? node.relPath : "主仓库";
+        // 未跟踪目录里属于子仓库目录的条目不进「删除全部」清单（它们由各自的组管理）
+        const discardFiles = entries
+          .map((e) => (typeof e === "string" ? e : e.path))
+          .filter((p) => (kind === "untracked" ? !isChildPath(p) : true));
         return React.createElement("div", { key: kind, className: "gm-filegroup" },
           React.createElement("div", { className: "gm-filegroup-head" },
             React.createElement("span", null, label + " (" + entries.length + ")"),
             kind === "untracked" ? React.createElement("button", {
               className: "gm-mini gm-mini-danger",
-              disabled: !!props.busy,
-              onClick: () => setConfirming({ kind: "discard-all", files: entries.map((e) => (typeof e === "string" ? e : e.path)), scope: "untracked" }),
+              disabled: !!props.busy || discardFiles.length === 0,
+              title: "删除该仓库下全部未跟踪文件/目录（嵌套仓库目录由 Host 保护跳过）",
+              onClick: () => setConfirming({ kind: "discard-all", files: discardFiles, scope: "untracked", repoPath: scopePath, repoName: groupName }),
             }, "删除全部") : null,
           ),
           entries.map((e) => {
             const entry = typeof e === "string" ? { path: e } : e;
-            const kindClass = (entry.kind && ("gm-file-kind-" + entry.kind)) || "";
-            const isActive = !!(diffWin && diffWin.file === entry.path && diffWin.scope === scope);
-            return React.createElement("div", {
-              key: entry.path,
-              className: "gm-file" + (isActive ? " gm-file-active" : ""),
-              title: "点击查看差异",
-              onClick: () => openDiff(entry.path, scope),
-            },
-              React.createElement("span", { className: "gm-file-kind " + kindClass }, entry.kind || "new"),
-              React.createElement("span", { className: "gm-file-path" }, entry.path),
-              entry.oldPath ? React.createElement("span", { className: "gm-file-old" }, "← " + entry.oldPath) : null,
-              scope === "staged" ? React.createElement("button", { className: "gm-mini", disabled: !!props.busy, onClick: (ev) => { ev.stopPropagation(); act("unstage", () => remote.unstage({ path: repoPath, files: [entry.path] })); } }, "取消暂存") : null,
-              scope === "unstaged" || scope === "untracked" ? React.createElement("button", { className: "gm-mini", disabled: !!props.busy, onClick: (ev) => { ev.stopPropagation(); act("stage", () => remote.stage({ path: repoPath, files: [entry.path] })); } }, "暂存") : null,
-              scope === "staged" || scope === "unstaged" ? React.createElement("button", {
-                className: "gm-mini",
-                title: "逐行追溯（blame）该文件",
-                onClick: (ev) => { ev.stopPropagation(); openBlame(entry.path); },
-              }, "Blame") : null,
-              scope === "staged" || scope === "unstaged" ? React.createElement("button", {
-                className: "gm-mini",
-                title: "该文件的提交历史",
-                onClick: (ev) => { ev.stopPropagation(); openFileHist(entry.path); },
-              }, "历史") : null,
-              scope === "staged" || scope === "unstaged" || scope === "untracked" ? React.createElement("button", {
-                className: "gm-mini gm-mini-danger",
-                disabled: !!props.busy,
-                onClick: (ev) => { ev.stopPropagation(); setConfirming({ kind: "discard", entry, scope }); },
-              }, scope === "untracked" ? "删除" : "丢弃") : null,
-            );
+            // 子仓库目录（嵌套仓库 / 未初始化子模块）有自己的组，root 组不重复渲染
+            if (kind === "untracked" && isChildPath(entry.path)) return null;
+            const sub = kind !== "untracked" && isSubEntry(entry);
+            const badge = sub ? subBadgeOf(entry) : null;
+            const child = childNodeByRel[normalizeRel(entry.path)];
+            // 子模块行的指针 a→b（契约 §3.6）：已暂存指针变更优先，其次未暂存漂移
+            const ptr = sub ? subPointerOf(entry, child) : null;
+            return renderFileRow(entry, scope, scopePath, groupName, {
+              sub: !!sub,
+              weaked: !!sub,
+              ptr: ptr,
+              discardable: !sub, // 子模块指针行不给「丢弃」（撤销走「取消暂存」）
+              badge: badge ? badge.text : null,
+              badgeCls: badge ? badge.cls : "",
+              onEnter: (sub && child) ? () => props.setActiveRepoId(child.id) : null,
+            });
           }),
+        );
+      };
+
+      // ---- 仓库组（组头 + 组内三个 scope 子组） ----
+      const toggleCollapse = (id) => setCollapsed((cur) => {
+        const n = new Set(cur);
+        if (n.has(id)) n.delete(id); else n.add(id);
+        return n;
+      });
+
+      const renderRepoGroup = (node) => {
+        const st = statusFor(node);
+        const isRoot = !node.relPath;
+        const counts = st
+          ? { staged: st.staged.length, unstaged: st.unstaged.length, untracked: st.untracked.length }
+          : { staged: 0, unstaged: 0, untracked: 0 };
+        const dirty = (!st && node.dirty) ? node.dirty : counts;
+        const isCollapsed = collapsed.has(node.id);
+        const displayName = isRoot ? ("主仓库" + (node.name ? " · " + node.name : "")) : (node.name || node.relPath);
+        const branchText = node.branch
+          ? node.branch
+          : (node.detached ? ("detached " + shortSha(node.headShort)) : (node.unborn ? "(尚无提交)" : ""));
+        const subBadge = repoNodeBadge(node);
+        return React.createElement("div", { key: node.id || "root", className: "gm-repogroup" },
+          React.createElement("div", { className: "gm-repogroup-head" },
+            React.createElement("button", {
+              className: "gm-mini",
+              title: isCollapsed ? "展开该仓库的变更" : "折叠该仓库的变更",
+              onClick: () => toggleCollapse(node.id || ""),
+            }, isCollapsed ? "▸" : "▾"),
+            repoKindIcon(node.kind),
+            React.createElement("span", { className: "gm-repogroup-name", title: node.path }, displayName),
+            node.relPath ? React.createElement("span", { className: "gm-repogroup-rel", title: "相对路径：" + node.relPath }, node.relPath) : null,
+            branchText ? React.createElement("span", { className: "gm-repogroup-branch", title: "分支：" + branchText }, branchText) : null,
+            React.createElement("span", { className: "gm-repogroup-counts", title: "已暂存 / 未暂存 / 未跟踪" },
+              "+" + ((dirty && dirty.staged) || 0) + " −" + ((dirty && dirty.unstaged) || 0) + " ?" + ((dirty && dirty.untracked) || 0)),
+            subBadge ? React.createElement("span", { className: "gm-sub-badge " + subBadge.c }, subBadge.t) : null,
+            React.createElement("span", { style: { flex: 1 } }),
+            // 未初始化子模块：组头一键初始化（P2），放在「进入」左侧
+            node.initialized === false && !node.error
+              ? React.createElement("button", {
+                  className: "gm-mini",
+                  disabled: !!props.busy,
+                  title: "初始化并拉取该子模块（git submodule update --init --recursive " + node.relPath + "；首次克隆需联网，可能较慢）",
+                  onClick: () => initSubmodule(node),
+                }, "初始化")
+              : null,
+            React.createElement("button", {
+              className: "gm-mini",
+              disabled: isRoot ? !props.activeRepo : (node.initialized === false),
+              title: isRoot
+                ? "把面板作用域切回主仓库（分支 / 历史 / 冲突 / Worktree / 设置 一并跟随）"
+                : "把面板作用域切到该仓库（分支 / 历史 / 冲突 / Worktree / 设置 一并跟随）",
+              onClick: () => props.setActiveRepoId(isRoot ? "" : node.id),
+            }, "进入"),
+          ),
+          isCollapsed ? null : React.createElement("div", { className: "gm-repogroup-body" },
+            node.error ? React.createElement("div", { className: "gm-notice-warn" }, "状态查询失败：" + node.error) : null,
+            node.initialized === false
+              ? React.createElement("div", { className: "gm-meta", style: { padding: "4px 6px" } }, "未初始化的子模块：目录内没有内容，也没有文件变更。")
+              : null,
+            !st && !node.error && node.initialized !== false
+              ? React.createElement("div", { className: "gm-meta", style: { padding: "4px 6px" } }, "加载该仓库状态…")
+              : null,
+            renderScopeGroup("Staged", st && st.staged, "staged", "staged", node),
+            renderScopeGroup("Unstaged", st && st.unstaged, "unstaged", "worktree", node),
+            renderScopeGroup("Untracked", st && st.untracked, "untracked", "untracked", node),
+            st && st.conflicted && st.conflicted.length > 0
+              ? React.createElement("div", { className: "gm-notice-warn" }, "该仓库有 " + st.conflicted.length + " 个冲突文件，请到「冲突」页处理。")
+              : null,
+          ),
         );
       };
 
@@ -1259,14 +1866,19 @@ window.__ModuleLoader__.load({
         setConfirming(null);
         if (!c) return;
         if (c.kind === "discard") {
+          const p = c.repoPath || repoPath;
           const file = c.entry.path || c.entry;
           if (c.scope === "staged") {
             // 已暂存的「丢弃」= 取消暂存 + 丢弃工作区改动（回到 HEAD 版本）
-            await act("unstage", () => remote.unstage({ path: repoPath, files: [file] }));
+            await actRepo("unstage", p, () => remote.unstage({ path: p, files: [file] }));
           }
-          await act("discard", () => remote.discard({ path: repoPath, files: [file], includeUntracked: c.scope === "untracked" }));
+          await actRepo("discard", p, () => remote.discard({ path: p, files: [file], includeUntracked: c.scope === "untracked" }));
         } else if (c.kind === "discard-all") {
-          await act("discard-all", () => remote.discard({ path: repoPath, files: c.files, includeUntracked: true }));
+          const p = c.repoPath || repoPath;
+          const r = await actRepo("discard-all", p, () => remote.discard({ path: p, files: c.files, includeUntracked: true }));
+          if (r && Array.isArray(r.skipped) && r.skipped.length > 0) {
+            setNotice("已保护跳过 " + r.skipped.length + " 个嵌套仓库目录：" + r.skipped.join("、"));
+          }
         } else if (c.kind === "stashDrop") {
           await doStashOp("stashDrop", () => remote.stashDrop({ path: repoPath, index: c.index }));
         } else if (c.kind === "stashClear") {
@@ -1275,17 +1887,17 @@ window.__ModuleLoader__.load({
           await applySelectedLines("discard");
         } else if (c.kind === "undoCommit") {
           // undo（契约 §8.5）：soft reset HEAD~1，改动回暂存区；toast 带重做提示
-          const r = await act("undoCommit", () => remote.reset({ path: repoPath, mode: "soft", target: "HEAD~1" }));
+          const r = await actRepo("undoCommit", commitPath, () => remote.reset({ path: commitPath, mode: "soft", target: "HEAD~1" }));
           if (r !== undefined) {
-            showToast("已撤销最后一次提交，改动保留在暂存区。\n重做：git reset --soft HEAD@{1}（或 git reflog 查看历史）。");
+            showToast("已撤销最后一次提交，改动保留在暂存区（" + commitLabel + "）。\n重做：git reset --soft HEAD@{1}（或 git reflog 查看历史）。");
           }
         }
       };
 
       const submitCommit = async () => {
         if (!commitMsg.trim()) { setError("提交信息不能为空"); return; }
-        const r = await act("commit", () => remote.commit({ path: repoPath, message: commitMsg, amend }));
-        if (r) { setCommitMsg(""); setAmend(false); setDiffWin(null); }
+        const r = await actRepo("commit", commitPath, () => remote.commit({ path: commitPath, message: commitMsg, amend }));
+        if (r) { setCommitMsg(""); setAmend(false); setDiffWin(null); setNotice(null); }
       };
 
       // amend 勾选时拉 HEAD 提交信息预填（空框才填，避免覆盖用户已输入内容）
@@ -1294,18 +1906,38 @@ window.__ModuleLoader__.load({
         let alive = true;
         (async () => {
           try {
-            const r = await unwrap(await remote.log({ path: repoPath, maxCount: 1 }));
+            const r = await unwrap(await remote.log({ path: commitPath, maxCount: 1 }));
             if (!alive || !r.ok || !r.value || !r.value.commits || r.value.commits.length === 0) return;
             setCommitMsg((m) => (m.trim() ? m : r.value.commits[0].subject || ""));
           } catch (_) { /* 预填失败不阻塞，用户手输即可 */ }
         })();
         return () => { alive = false; };
-      }, [amend, repoPath]);
+      }, [amend, commitPath]);
 
-      const isClean = !status || (status.staged.length + status.unstaged.length + status.untracked.length === 0);
+      const anyDirty = groupNodes.some((n) => {
+        const st = statusFor(n);
+        if (!st) return repoDirtyTotal(n.dirty) > 0;
+        return (st.staged.length + st.unstaged.length + st.untracked.length) > 0;
+      });
+
       return React.createElement(React.Fragment, null,
-        // 提交框（置顶）
+        notice ? React.createElement("div", { className: "gm-notice-warn" }, notice) : null,
+        // 提交框（置顶；目标仓库可切换，默认主仓库）
         React.createElement("div", { className: "gm-commit" },
+          commitTargets.length > 1 ? React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+            React.createElement("span", { className: "gm-form-label" }, "提交到"),
+            React.createElement("select", {
+              className: "gm-input",
+              style: { maxWidth: 260 },
+              value: commitNode ? commitNode.id : "",
+              title: "选择这次提交写入哪个仓库（各自独立的暂存区与提交历史）",
+              onChange: (e) => setCommitRepoId(e.target.value),
+            },
+              commitTargets.map((n) => React.createElement("option", {
+                key: n.id,
+                value: n.id,
+              }, (n.kind === "root" ? "主仓库" : n.name) + " (" + (n.branch || shortSha(n.headShort) || "?") + ")"))),
+          ) : null,
           React.createElement("textarea", {
             className: "gm-textarea",
             placeholder: "提交信息（支持多行）",
@@ -1321,31 +1953,38 @@ window.__ModuleLoader__.load({
             React.createElement("button", { className: "gm-btn gm-btn-primary", disabled: !!props.busy || !commitMsg.trim(), onClick: submitCommit }, "提交"),
           ),
         ),
-        // 工具行：暂存全部 / 取消暂存全部
+        // 工具行：暂存全部（主仓库）/ 取消暂存全部（作用域仓库）/ 撤销上次提交（提交目标仓库）
         React.createElement("div", { className: "gm-filterbar", style: { marginTop: 12, marginBottom: 0 } },
           React.createElement("button", {
             className: "gm-btn",
             disabled: !!props.busy,
-            title: "git add -A：暂存全部改动（含未跟踪文件）",
-            onClick: () => act("stage-all", () => remote.stage({ path: repoPath, files: [], all: true })),
+            title: nestedRels.length > 0
+              ? "git add -A（排除嵌套独立仓库目录：避免误产生 gitlink）"
+              : "git add -A：暂存全部改动（含未跟踪文件）",
+            onClick: () => {
+              const req = { path: rootRepoPath, files: [], all: true };
+              if (nestedRels.length > 0) req.exclude = nestedRels.slice();
+              return actRepo("stage-all", rootRepoPath, () => remote.stage(req));
+            },
           }, "暂存全部"),
           React.createElement("button", {
             className: "gm-btn",
             disabled: !!props.busy || !status || status.staged.length === 0,
-            onClick: () => act("unstage-all", () => remote.unstage({ path: repoPath, files: status.staged.map((e) => e.path) })),
+            title: "取消暂存当前作用域仓库的全部暂存改动",
+            onClick: () => actRepo("unstage-all", repoPath, () => remote.unstage({ path: repoPath, files: status.staged.map((e) => e.path) })),
           }, "取消暂存全部"),
           React.createElement("button", {
             className: "gm-btn",
             disabled: !!props.busy,
-            title: "git reset --soft HEAD~1：撤销最后一次提交，改动保留在暂存区",
-            onClick: () => setConfirming({ kind: "undoCommit" }),
+            title: "git reset --soft HEAD~1：撤销最后一次提交，改动保留在暂存区（作用于提交目标仓库）",
+            onClick: () => setConfirming({ kind: "undoCommit", repoName: commitLabel }),
           }, "撤销上次提交"),
           React.createElement("span", { style: { flex: 1 } }),
-          isClean ? React.createElement("span", { className: "gm-meta" }, "工作区干净。") : null,
+          !anyDirty ? React.createElement("span", { className: "gm-meta" },
+            groupNodes.length > 1 ? "所有仓库的工作区干净。" : "工作区干净。") : null,
         ),
-        renderGroup("Staged", status && status.staged, "staged", "staged"),
-        renderGroup("Unstaged", status && status.unstaged, "unstaged", "worktree"),
-        renderGroup("Untracked", status && status.untracked, "untracked", "untracked"),
+        // 按仓库分组的文件列表（root 在最上，其余按 relPath 字典序）
+        groupNodes.map(renderRepoGroup),
         // Stash 折叠区
         React.createElement("div", { className: "gm-section" },
           React.createElement("div", { className: "gm-section-head" },
@@ -1377,13 +2016,29 @@ window.__ModuleLoader__.load({
         ),
         // diff 独立窗口（含行级选择；契约 §8.3）
         diffWin ? React.createElement(DiffWindow, {
-          title: diffWin.file,
-          sub: SCOPE_LABEL[diffWin.scope] || diffWin.scope,
+          title: (diffWin.groupName && diffWin.groupName !== "主仓库" ? (diffWin.groupName + " · ") : "") + diffWin.file,
+          // 子模块指针条目：副标题升级为「指针 a → b」（契约 §3.6），下钻按钮在头部右侧
+          sub: (SCOPE_LABEL[diffWin.scope] || diffWin.scope)
+            + (ptr ? (" · 指针 " + shortSha(ptr.fromSha) + " → " + shortSha(ptr.toSha)) : (diffWin.gitlink ? "（子模块指针条目）" : "")),
           loading: diffWin.loading,
           text: diffWin.text,
           truncated: diffWin.truncated,
           onClose: () => { setDiffWin(null); setLineSel(null); },
-          onRefresh: () => openDiff(diffWin.file, diffWin.scope),
+          onRefresh: () => openDiff(diffWin.file, diffWin.scope, diffWin.repoPath, diffWin.groupName, diffWin.gitlink, diffWin.ptr),
+          actions: ptr ? React.createElement("button", {
+            className: "gm-btn",
+            disabled: ptrState !== "ok" || !!props.busy,
+            title: ptrState === "ok"
+              ? ("切到该子仓库的历史页并对比 " + shortSha(ptr.fromSha) + ".." + shortSha(ptr.toSha))
+              : (ptrState === "checking"
+                  ? "正在核验指针提交是否在子仓库当前对象库中…"
+                  : (ptrState === "no-sub"
+                      ? "该路径不在仓库树里（未初始化的子模块或嵌入仓库），无法下钻查看子仓库历史"
+                      : (ptrReason || "指针提交不在该子仓库当前对象库（浅克隆或指针已前移）"))),
+            onClick: jumpToSubRange,
+          }, ptrState === "checking"
+            ? "核验指针…"
+            : ("在子仓库中查看 " + shortSha(ptr.fromSha) + ".." + shortSha(ptr.toSha))) : null,
           hunkActions: hunkActions,
           sel: lineSel,
           onLineClick: onLineClick,
@@ -1395,8 +2050,8 @@ window.__ModuleLoader__.load({
           loading: fileHist.loading,
           entries: fileHist.entries,
           onClose: () => setFileHist(null),
-          onRefresh: () => openFileHist(fileHist.file),
-          onOpenCommit: (c) => openHistDiff(fileHist.file, c),
+          onRefresh: () => openFileHist(fileHist.file, fileHist.repoPath),
+          onOpenCommit: (c) => openHistDiff(fileHist.file, c, fileHist.repoPath),
         }) : null,
         histDiff ? React.createElement(DiffWindow, {
           title: histDiff.title,
@@ -1405,7 +2060,7 @@ window.__ModuleLoader__.load({
           text: histDiff.text,
           truncated: histDiff.truncated,
           onClose: () => setHistDiff(null),
-          onRefresh: () => openHistDiff(histDiff.file, histDiff.c),
+          onRefresh: () => openHistDiff(histDiff.file, histDiff.c, fileHist ? fileHist.repoPath : repoPath),
         }) : null,
         // 只读 blame 窗口（契约 §3.4b）
         blameWin ? React.createElement(BlameWindow, {
@@ -1415,13 +2070,15 @@ window.__ModuleLoader__.load({
           lines: blameWin.lines,
           truncated: blameWin.truncated,
           onClose: () => setBlameWin(null),
-          onRefresh: () => openBlame(blameWin.file, blameWin.ref),
+          onRefresh: () => openBlame(blameWin.file, blameWin.ref, blameWin.repoPath),
         }) : null,
         // 危险操作二次确认（Portal 落 body，浮于 diff 窗口 1050 之上，契约 §0）
         React.createElement(ConfirmDialog, {
           open: !!confirming && (confirming.kind === "discard" || confirming.kind === "discard-all"),
           title: "放弃变更？",
-          message: "此操作会丢弃对以下文件的所有本地改动，无法撤销：\n\n" + (confirming && confirming.kind === "discard" ? (confirming.entry.path || confirming.entry) : (confirming && confirming.files ? confirming.files.join("\n") : "")),
+          message: "此操作会丢弃对以下文件的所有本地改动，无法撤销："
+            + (confirming && confirming.repoName ? "\n\n仓库：" + confirming.repoName : "")
+            + "\n\n" + (confirming && confirming.kind === "discard" ? (confirming.entry.path || confirming.entry) : (confirming && confirming.files ? confirming.files.join("\n") : "")),
           danger: true,
           confirmLabel: "确认丢弃",
           onCancel: () => setConfirming(null),
@@ -1439,7 +2096,8 @@ window.__ModuleLoader__.load({
         React.createElement(ConfirmDialog, {
           open: !!confirming && confirming.kind === "undoCommit",
           title: "撤销上次提交？",
-          message: "将执行 git reset --soft HEAD~1：撤销最后一次提交，其改动保留在暂存区（不丢失内容）。\n\n重做提示：git reset --soft HEAD@{1}（或 git reflog 查看历史）。",
+          message: "将执行 git reset --soft HEAD~1：撤销 " + (confirming && confirming.repoName ? confirming.repoName : "目标仓库")
+            + " 的最后一次提交，其改动保留在暂存区（不丢失内容）。\n\n重做提示：git reset --soft HEAD@{1}（或 git reflog 查看历史）。",
           danger: false,
           confirmLabel: "撤销上次提交",
           onCancel: () => setConfirming(null),
@@ -1526,6 +2184,9 @@ window.__ModuleLoader__.load({
       };
 
       React.useEffect(() => { refresh(); loadTags(); }, [repoPath]);
+
+      // 切换作用域仓库 → 清空上一个仓库的分支/远端数据（避免短暂串仓库）
+      React.useEffect(() => { setBranches(null); setRemotes([]); setTags([]); }, [repoPath]);
 
       const createNew = async (form) => {
         const f = form && form.name !== undefined ? form : creating;
@@ -1757,6 +2418,9 @@ window.__ModuleLoader__.load({
         if (r.ok) setLog(r.value);
         else setError(r.error.message || r.error.code);
       };
+
+      // 切换作用域仓库 → 立刻清空上一个仓库的历史（避免短暂显示别的仓库的提交）
+      React.useEffect(() => { setLog(null); setDetail(null); }, [repoPath]);
 
       // 过滤条件变更 → 防抖重取
       React.useEffect(() => {
@@ -2014,6 +2678,26 @@ window.__ModuleLoader__.load({
         setCmpDiff(null);
       };
 
+      // P1 §3.6：外部（子模块指针跳转按钮）请求的范围对比——复用现有对比流程，
+      // 直接发起 diffRange 并弹对比窗口。rangeReq 为 null / nonce 未变 → 不触发；
+      // 消费后立刻 requestRange(null) 回执清空（一次性），否则用户手动切回历史 Tab
+      // （组件重新挂载）会重复弹出这次对比。切换作用域仓库时重置记账，允许重放。
+      const rangeNonceRef = React.useRef(0);
+      React.useEffect(() => { rangeNonceRef.current = 0; }, [repoPath]);
+      React.useEffect(() => {
+        const rr = props.rangeReq;
+        if (!rr || !rr.fromSha || !rr.toSha || typeof rr.nonce !== "number") return;
+        if (rangeNonceRef.current === rr.nonce) return;
+        rangeNonceRef.current = rr.nonce;
+        setComparing(true);
+        setCmpSel([
+          { sha: rr.fromSha, short: shortSha(rr.fromSha), subject: "指针 " + shortSha(rr.fromSha) },
+          { sha: rr.toSha, short: shortSha(rr.toSha), subject: "指针 " + shortSha(rr.toSha) },
+        ]);
+        if (props.requestRange) props.requestRange(null);
+        openCompareDiff(rr.fromSha, rr.toSha, "patch");
+      }, [props.rangeReq && props.rangeReq.nonce, repoPath]);
+
       if (!log && viewMode === "log") return React.createElement("div", { className: "gm-empty" }, "加载历史…");
 
       const { commits, graph, hasMore } = log || { commits: [], graph: { nodes: [], links: [], laneCount: 1 }, hasMore: false };
@@ -2144,7 +2828,9 @@ window.__ModuleLoader__.load({
         ? React.createElement("div", { className: "gm-notice" },
             cmpSel.length === 0
               ? "对比模式：点击选择 base 提交…"
-              : "对比模式：已选 base " + cmpSel[0].short + "，点击选择 head 提交…",
+              : (cmpSel.length === 1
+                  ? "对比模式：已选 base " + cmpSel[0].short + "，点击选择 head 提交…"
+                  : "对比模式：已选 " + cmpSel[0].short + " → " + cmpSel[1].short + "，差异已在弹窗中展示（点「退出对比」结束）"),
           )
         : null;
 
@@ -2478,8 +3164,23 @@ window.__ModuleLoader__.load({
         else setError(r.error.message || r.error.code);
       };
 
-      const resolveOurs = (file) => act("resolveOurs", () => remote.resolveConflict({ path: repoPath, file, strategy: "ours" }));
-      const resolveTheirs = (file) => act("resolveTheirs", () => remote.resolveConflict({ path: repoPath, file, strategy: "theirs" }));
+      // 指针冲突条目（契约 §3.6）：冲突路径命中仓库树里的子节点（submodule / 嵌套均算）
+      // → 渲染「指针冲突」行，只给 ours/theirs 两个指针按钮（Host 侧 custom 对 gitlink
+      // 会抛错，手动编辑没有意义，不提供入口）。
+      const repos = Array.isArray(props.repos) ? props.repos : [];
+      const nodeByRel = {};
+      repos.forEach((n) => { if (n && n.relPath) nodeByRel[normalizeRel(n.relPath)] = n; });
+      const pointerNodeOf = (path) => nodeByRel[normalizeRel(path)] || null;
+
+      // 解决后除面板 act 的 status 刷新外，再刷一次仓库树——六 Tab 徽标与切换器红点
+      // 是对所有仓库 dirty.conflicted 求和（§3.3），只刷作用域仓库的 status 不够。
+      const refreshTree = typeof props.refreshTree === "function" ? props.refreshTree : null;
+      const afterResolve = async (r) => {
+        if (refreshTree) await refreshTree();
+        return r;
+      };
+      const resolveOurs = (file) => act("resolveOurs", () => remote.resolveConflict({ path: repoPath, file, strategy: "ours" })).then(afterResolve);
+      const resolveTheirs = (file) => act("resolveTheirs", () => remote.resolveConflict({ path: repoPath, file, strategy: "theirs" })).then(afterResolve);
       const resolveCustom = async (file, content) => act("resolveCustom", () => remote.resolveConflict({ path: repoPath, file, strategy: "custom", content }));
       const doAbort = async () => {
         setConfirming(null);
@@ -2509,16 +3210,37 @@ window.__ModuleLoader__.load({
       const stashMode = !rebaseMode && conflictSource === "stash";
       const unknownMode = !rebaseMode && conflictSource == null && !status.merging;
       return React.createElement(React.Fragment, null,
-        status.conflicted.map((c) => React.createElement("div", { key: c.path, className: "gm-filegroup" },
-          React.createElement("div", { className: "gm-filegroup-head" },
-            React.createElement("span", null, c.path),
-            React.createElement("span", { className: "gm-file-kind gm-file-kind-renamed" }, c.xy),
-            React.createElement("span", { style: { flex: 1 } }),
-            React.createElement("button", { className: "gm-btn", onClick: () => resolveOurs(c.path) }, "用我们的"),
-            React.createElement("button", { className: "gm-btn", onClick: () => resolveTheirs(c.path) }, "用他们的"),
-            React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: () => startEdit(c.path) }, "手动编辑"),
-          ),
-        )),
+        status.conflicted.map((c) => {
+          const ptrNode = pointerNodeOf(c.path);
+          return React.createElement("div", { key: c.path, className: "gm-filegroup" },
+            React.createElement("div", { className: "gm-filegroup-head" },
+              React.createElement("span", null, c.path),
+              React.createElement("span", { className: "gm-file-kind gm-file-kind-renamed" }, c.xy),
+              ptrNode
+                ? React.createElement("span", { className: "gm-sub-badge gm-sub-badge-warn", title: "子仓库指针（gitlink）冲突：解决方式是选用一侧记录的指针，不提供手动编辑" }, "子模块指针")
+                : null,
+              React.createElement("span", { style: { flex: 1 } }),
+              ptrNode
+                ? React.createElement(React.Fragment, null,
+                    React.createElement("button", {
+                      className: "gm-btn",
+                      title: "把该子仓库指针取为当前分支（ours）记录的提交",
+                      onClick: () => resolveOurs(c.path),
+                    }, "用我们的指针"),
+                    React.createElement("button", {
+                      className: "gm-btn",
+                      title: "把该子仓库指针取为待合并侧（theirs）记录的提交",
+                      onClick: () => resolveTheirs(c.path),
+                    }, "用他们的指针"),
+                  )
+                : React.createElement(React.Fragment, null,
+                    React.createElement("button", { className: "gm-btn", onClick: () => resolveOurs(c.path) }, "用我们的"),
+                    React.createElement("button", { className: "gm-btn", onClick: () => resolveTheirs(c.path) }, "用他们的"),
+                    React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: () => startEdit(c.path) }, "手动编辑"),
+                  ),
+            ),
+          );
+        }),
         rebaseMode
           ? React.createElement("div", {
               className: "gm-banner",
@@ -2600,6 +3322,9 @@ window.__ModuleLoader__.load({
       };
 
       React.useEffect(() => { refresh(); }, [repoPath]);
+
+      // 切换作用域仓库 → 清空上一个仓库的 worktree 列表（避免短暂串仓库）
+      React.useEffect(() => { setWorktrees(null); setNotice(null); }, [repoPath]);
 
       const doAdd = async () => {
         if (!adding.path) return;
@@ -2686,6 +3411,265 @@ window.__ModuleLoader__.load({
     // ============================================================================
     // SettingsTab（remote 增删改 + config 读写；Host P2 方法未就位时显示占位）
     // ============================================================================
+    // ============================================================================
+    // SubReposSection（设置 Tab「子仓库」管理区，子仓库支持 P2）
+    //   数据源 = tabProps.repos（repoTree 结果；null = 仓库树不可用，整区占位）。
+    //   行 = 子模块节点（初始化/更新/同步 url/卸载/进入）；尾部 = 未注册的嵌套
+    //   独立仓库（有 remote origin url 才可「注册为 submodule」）。
+    //   所有操作走面板 act（busy 防重入 + 错误条原样展示 Host 报错）。
+    // ============================================================================
+    function SubReposSection(props) {
+      const remote = props.remote;
+      const repos = Array.isArray(props.repos) ? props.repos : null;
+      const rootRepoPath = props.rootRepoPath || props.repoPath;
+      const scopedPath = props.repoPath;                       // 当前作用域仓库（可能≠root）
+      const act = props.act;
+      const busy = !!props.busy;
+      const [notice, setNotice] = React.useState(null);
+      const [addDlg, setAddDlg] = React.useState(null);         // { url, subPath, name }
+      const [confirming, setConfirming] = React.useState(null); // { kind:"deinit", node }
+
+      // Host 未上线 submodule 方法时（灰度 / 旧 Host）：整区只读提示，不发请求
+      const hasApi = typeof remote.submoduleUpdate === "function" && typeof remote.submoduleAdd === "function";
+      React.useEffect(() => { setNotice(null); setAddDlg(null); setConfirming(null); }, [rootRepoPath]);
+
+      const ordered = repos ? orderRepoNodes(repos) : [];
+      const subNodes = ordered.filter((n) => n && n.kind === "submodule");
+      const nestedNodes = ordered.filter((n) => n && n.kind === "nested");
+
+      // 成功后的收尾：刷新仓库树（徽标 / 初始化态 / 嵌套转子模块后的分组）+
+      // 纠正作用域仓库 status（面板 act 会把「被操作仓库」的 status 写进面板级
+      // status——当操作仓库 ≠ 作用域仓库时那是别的仓库的 status，需重取，
+      // 同 ChangesTab 的 actRepo 约定）。
+      const afterMutate = async () => {
+        if (typeof props.refreshTree === "function") await props.refreshTree();
+        if (scopedPath && scopedPath !== rootRepoPath && props.onStatus) {
+          try {
+            const s = await unwrap(await remote.status({ path: scopedPath }));
+            if (s.ok && s.value) props.onStatus(s.value);
+          } catch (_) { /* 忽略：面板 15s 轮询自愈 */ }
+        }
+      };
+      // act 返回 undefined = 失败（错误已进面板错误条，原样展示，不覆盖）
+      const run = async (label, fn, okText) => {
+        const r = await act(label, fn);
+        if (r === undefined) return false;
+        setNotice(okText);
+        await afterMutate();
+        return true;
+      };
+
+      const doInit = (node) => run("submoduleUpdate",
+        () => remote.submoduleUpdate({ path: rootRepoPath, subPath: node.relPath, init: true, recursive: true }),
+        "已初始化 " + (node.name || node.relPath));
+      const doUpdate = (node) => run("submoduleUpdate",
+        () => remote.submoduleUpdate({ path: rootRepoPath, subPath: node.relPath }),
+        "已更新 " + (node.name || node.relPath));
+      const doSync = (node) => run("submoduleSync",
+        () => remote.submoduleSync({ path: rootRepoPath, subPath: node.relPath }),
+        "已用 .gitmodules 的 url 同步 " + (node.name || node.relPath));
+      const doDeinit = (node) => run("submoduleDeinit",
+        // force:true 与确认弹窗文案对齐（「会清空工作区内容」= deinit -f 语义）；
+        // 不带 -f 时 git 对有本地改动/未跟踪文件的子模块会直接拒绝，弹窗警告就落空了。
+        () => remote.submoduleDeinit({ path: rootRepoPath, subPath: node.relPath, force: true }),
+        "已卸载 " + (node.name || node.relPath) + "（.gitmodules 注册保留，可用初始化恢复）");
+      const doRegister = (node) => run("submoduleAdd",
+        () => remote.submoduleAdd({ path: rootRepoPath, url: node.originUrl, subPath: node.relPath }),
+        "已注册子模块 " + (node.name || node.relPath) + "（就地注册，目录内容未变）");
+
+      const doAdd = async () => {
+        const d = addDlg;
+        if (!d) return;
+        const req = { path: rootRepoPath, url: d.url.trim(), subPath: normalizeRel(d.subPath.trim()) };
+        if (d.name.trim()) req.name = d.name.trim();
+        const r = await act("submoduleAdd", () => remote.submoduleAdd(req));
+        if (r === undefined) return;   // 失败：表单保留，用户可改 url / 相对路径重试
+        setAddDlg(null);
+        setNotice("已添加子模块 " + (req.name || req.subPath));
+        await afterMutate();
+      };
+
+      const enterRepo = (node) => {
+        if (typeof props.setActiveRepoId === "function") props.setActiveRepoId(node.id);
+      };
+
+      // 行：name + relPath + 状态徽标 + 分支/HEAD + url（次要色）+ 按钮组
+      const renderSubRow = (node) => {
+        const badge = repoNodeBadge(node);
+        const name = node.name || node.relPath;
+        const rev = node.branch
+          ? ("分支 " + node.branch)
+          : (node.detached ? ("detached " + shortSha(node.headShort)) : (node.unborn ? "(尚无提交)" : shortSha(node.headShort)));
+        const url = (node.submodule && node.submodule.url) ? node.submodule.url : "";
+        const meta = rev + (url ? "  ·  " + url : "");
+        return React.createElement("div", { key: node.id, className: "gm-sub-row" },
+          repoKindIcon(node.kind),
+          React.createElement("span", { className: "gm-sub-row-name", title: name }, name),
+          React.createElement("span", { className: "gm-sub-row-rel", title: "相对主仓库路径：" + node.relPath }, node.relPath),
+          badge ? React.createElement("span", { className: "gm-sub-badge " + badge.c }, badge.t) : null,
+          React.createElement("span", { className: "gm-sub-row-meta", title: meta }, meta),
+          React.createElement("span", { className: "gm-sub-row-actions" },
+            node.initialized === false
+              ? React.createElement("button", {
+                  className: "gm-mini",
+                  disabled: busy || !hasApi,
+                  title: "初始化并拉取（git submodule update --init --recursive " + node.relPath + "；首次克隆需联网，可能较慢）",
+                  onClick: () => doInit(node),
+                }, "初始化并拉取")
+              : React.createElement(React.Fragment, null,
+                  React.createElement("button", {
+                    className: "gm-mini",
+                    disabled: busy || !hasApi,
+                    title: "拉取主仓库记录的指针（git submodule update " + node.relPath + "；首次克隆需联网，可能较慢）",
+                    onClick: () => doUpdate(node),
+                  }, "更新"),
+                  React.createElement("button", {
+                    className: "gm-mini",
+                    disabled: busy || !hasApi,
+                    title: "把 .gitmodules 里登记的 url 同步到 .git/config（git submodule sync " + node.relPath + "）",
+                    onClick: () => doSync(node),
+                  }, "同步 url"),
+                  React.createElement("button", {
+                    className: "gm-mini gm-mini-danger",
+                    disabled: busy || !hasApi,
+                    title: "卸载该子模块（git submodule deinit " + node.relPath + "，会清空其工作区内容）",
+                    onClick: () => setConfirming({ kind: "deinit", node }),
+                  }, "卸载"),
+                ),
+            React.createElement("button", {
+              className: "gm-mini",
+              disabled: busy || node.initialized === false,
+              title: "把面板作用域切到该子仓库（分支 / 历史 / 冲突 / Worktree / 设置 一并跟随）",
+              onClick: () => enterRepo(node),
+            }, "进入"),
+          ),
+        );
+      };
+
+      // 未注册的嵌套独立仓库：有 remote origin url 才能就地注册为 submodule
+      const renderNestedRow = (node) => {
+        const name = node.name || node.relPath;
+        const rev = node.branch
+          ? ("分支 " + node.branch)
+          : (node.detached ? ("detached " + shortSha(node.headShort)) : shortSha(node.headShort));
+        return React.createElement("div", { key: node.id, className: "gm-sub-row" },
+          repoKindIcon(node.kind),
+          React.createElement("span", { className: "gm-sub-row-name", title: name }, name),
+          React.createElement("span", { className: "gm-sub-row-rel", title: "相对主仓库路径：" + node.relPath }, node.relPath),
+          React.createElement("span", { className: "gm-sub-badge gm-sub-badge-mute" }, "未注册"),
+          React.createElement("span", { className: "gm-sub-row-meta", title: node.originUrl ? ("origin: " + node.originUrl) : "无 remote" },
+            node.originUrl ? (rev + "  ·  " + node.originUrl) : (rev + "  ·  （无 remote.origin.url）")),
+          React.createElement("span", { className: "gm-sub-row-actions" },
+            React.createElement("button", {
+              className: "gm-mini",
+              disabled: busy || !hasApi || !node.originUrl,
+              title: node.originUrl
+                ? "就地注册为 submodule（git submodule add " + node.originUrl + " " + node.relPath + "；目录内容不动，仅写入 .gitmodules 与 gitlink）"
+                : "该仓库没有配置 remote.origin.url，无法注册为 submodule",
+              onClick: () => doRegister(node),
+            }, "注册为 submodule"),
+            React.createElement("button", {
+              className: "gm-mini",
+              disabled: busy,
+              title: "把面板作用域切到该仓库（分支 / 历史 / 冲突 / Worktree / 设置 一并跟随）",
+              onClick: () => enterRepo(node),
+            }, "进入"),
+          ),
+        );
+      };
+
+      const sectionHead = React.createElement("div", { className: "gm-section-head" },
+        React.createElement("span", null, "子仓库" + (repos ? "（子模块 " + subNodes.length + " / 嵌套 " + nestedNodes.length + "）" : "")),
+        React.createElement("span", { style: { flex: 1 } }),
+        React.createElement("button", {
+          className: "gm-mini",
+          disabled: busy || !hasApi || !rootRepoPath,
+          title: hasApi
+            ? "把一个新仓库注册为子模块（会克隆到给定相对路径并在主仓库写入 gitlink 与 .gitmodules）"
+            : "当前 Host 版本尚未提供 submodule 管理方法",
+          onClick: () => setAddDlg({ url: "", subPath: "", name: "" }),
+        }, "添加子模块"),
+      );
+
+      let body;
+      if (!repos) {
+        body = React.createElement("div", { className: "gm-meta", style: { padding: "6px 2px" } },
+          "子仓库信息不可用：当前 Host 未提供仓库树（repoTree）或查询失败。");
+      } else if (subNodes.length === 0 && nestedNodes.length === 0) {
+        body = React.createElement("div", { className: "gm-meta", style: { padding: "6px 2px" } },
+          "当前仓库没有子模块，也没有嵌套独立仓库。");
+      } else {
+        body = React.createElement(React.Fragment, null,
+          subNodes.map(renderSubRow),
+          nestedNodes.length > 0
+            ? React.createElement("div", { className: "gm-sub-group-hint" }, "未注册的嵌套仓库（普通目录里的独立 git 仓库）")
+            : null,
+          nestedNodes.map(renderNestedRow),
+        );
+      }
+
+      return React.createElement("div", { className: "gm-section", style: { marginTop: 0 } },
+        sectionHead,
+        notice ? React.createElement("div", { className: "gm-notice", style: { marginTop: 8, marginBottom: 4 } }, notice) : null,
+        body,
+        // 「添加子模块」表单弹窗（与 remote / worktree / tag 新建同款 FormDialog 体系）
+        addDlg ? React.createElement(FormDialog, {
+          open: true,
+          title: "添加子模块",
+          message: "会在主仓库下克隆该仓库到指定相对路径，并写入 .gitmodules 与 gitlink（git submodule add）。",
+          submitLabel: "添加",
+          submitDisabled: !addDlg.url.trim() || !addDlg.subPath.trim() || !!busy,
+          onClose: () => setAddDlg(null),
+          onSubmit: doAdd,
+          children: React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "gm-form-row" },
+              React.createElement("span", { className: "gm-form-label" }, "仓库地址"),
+              React.createElement("input", {
+                className: "gm-input",
+                placeholder: "https://… 或 git@… 或本地绝对路径",
+                value: addDlg.url,
+                onChange: (e) => setAddDlg((s) => ({ ...s, url: e.target.value })),
+              }),
+            ),
+            React.createElement("div", { className: "gm-form-row" },
+              React.createElement("span", { className: "gm-form-label" }, "相对路径（相对主仓库根，如 libs/extra）"),
+              React.createElement("input", {
+                className: "gm-input",
+                placeholder: "libs/extra",
+                value: addDlg.subPath,
+                onChange: (e) => setAddDlg((s) => ({ ...s, subPath: e.target.value })),
+              }),
+            ),
+            React.createElement("div", { className: "gm-form-row" },
+              React.createElement("span", { className: "gm-form-label" }, "名称（可选，缺省用路径末段）"),
+              React.createElement("input", {
+                className: "gm-input",
+                placeholder: "extra",
+                value: addDlg.name,
+                onChange: (e) => setAddDlg((s) => ({ ...s, name: e.target.value })),
+              }),
+            ),
+          ),
+        }) : null,
+        // 卸载是危险操作：清空子仓库工作区内容（.gitmodules 注册保留，可再初始化回来）
+        React.createElement(ConfirmDialog, {
+          open: !!confirming && confirming.kind === "deinit",
+          title: "卸载子模块？",
+          message: "卸载会清空该子仓库工作区内容（.gitmodules 注册保留），可用初始化恢复。\n目标："
+            + (confirming && confirming.node ? ((confirming.node.name || confirming.node.relPath) + "（" + confirming.node.relPath + "）") : ""),
+          danger: true,
+          confirmLabel: "卸载",
+          onCancel: () => setConfirming(null),
+          onConfirm: async () => {
+            const node = confirming && confirming.node;
+            setConfirming(null);
+            if (!node) return;
+            await doDeinit(node);
+          },
+        }),
+      );
+    }
+
     function SettingsTab(props) {
       const remote = props.remote;
       const repoPath = props.repoPath;
@@ -2698,6 +3682,9 @@ window.__ModuleLoader__.load({
       const [remoteDlg, setRemoteDlg] = React.useState(null); // { mode: "add" | "rename", name, url, pushUrl, oldName }
       const [cfgNew, setCfgNew] = React.useState({ key: "", value: "" });
       const [cfgEdit, setCfgEdit] = React.useState({}); // key → { key, value }（行内编辑暂存）
+
+      // 切换作用域仓库 → 清空上一个仓库的 config / remote 与行内编辑暂存（避免短暂串仓库）
+      React.useEffect(() => { setReady(null); setEntries([]); setRemotes([]); setCfgEdit({}); }, [repoPath]);
 
       // P2 就位探测：Host 未实现 configList/remoteAdd 时 RPC 会报错 → 显示「即将推出」，
       // 绝不在未就位时反复调用未定义方法。
@@ -2774,16 +3761,37 @@ window.__ModuleLoader__.load({
         setCfgNew({ key: "", value: "" });
       };
 
-      if (ready === null) return React.createElement("div", { className: "gm-empty" }, "加载设置…");
+      // 「子仓库」管理区（子仓库支持 P2）：置于设置页内容区顶部（Remote 区之前），
+      // 不依赖 configList / remoteAdd 是否就绪——故在 ready 分支之前就构造好。
+      const subReposSection = React.createElement(SubReposSection, {
+        remote,
+        repos: props.repos,
+        repoPath,
+        rootRepoPath: props.rootRepoPath || repoPath,
+        act,
+        busy: props.busy,
+        onStatus: props.onStatus,
+        refreshTree: props.refreshTree,
+        setActiveRepoId: props.setActiveRepoId,
+      });
+
+      if (ready === null) return React.createElement(React.Fragment, null,
+        subReposSection,
+        React.createElement("div", { className: "gm-empty" }, "加载设置…"),
+      );
 
       if (ready === false) {
-        return React.createElement("div", { className: "gm-empty" },
-          React.createElement("div", { style: { fontWeight: 500, marginBottom: 8 } }, "设置（remote / config 管理）"),
-          "即将推出：当前 Host 版本尚未提供 remoteAdd / remoteRemove / remoteRename / configList / configSet / configUnset 方法。",
+        return React.createElement(React.Fragment, null,
+          subReposSection,
+          React.createElement("div", { className: "gm-empty" },
+            React.createElement("div", { style: { fontWeight: 500, marginBottom: 8 } }, "设置（remote / config 管理）"),
+            "即将推出：当前 Host 版本尚未提供 remoteAdd / remoteRemove / remoteRename / configList / configSet / configUnset 方法。",
+          ),
         );
       }
 
       return React.createElement(React.Fragment, null,
+        subReposSection,
         // Remote 区
         React.createElement("div", { className: "gm-section", style: { marginTop: 0 } },
           React.createElement("div", { className: "gm-section-head" },

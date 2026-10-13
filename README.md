@@ -14,7 +14,7 @@
 
 ---
 
-为 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) Web UI 打造的 **Git 工作区管理**插件：不用再切到外部 Git 客户端——输入框工具行的 Git 按钮一键打开与「设置」同规格的居中面板，按六个功能域覆盖日常全部 Git 操作：变更暂存（hunk 级 / 行级 / stash）、分支与 tag、带分支线图形的提交历史（交互式 rebase / revert / reset / fixup / undo / 范围对比）、合并冲突解决、worktree 管理，以及 remote / config 仓库设置。
+为 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) Web UI 打造的 **Git 工作区管理**插件：不用再切到外部 Git 客户端——输入框工具行的 Git 按钮一键打开与「设置」同规格的居中面板，按六个功能域覆盖日常全部 Git 操作：变更暂存（hunk 级 / 行级 / stash）、分支与 tag、带分支线图形的提交历史（交互式 rebase / revert / reset / fixup / undo / 范围对比）、合并冲突解决、worktree 管理、remote / config 仓库设置，以及**子仓库支持**（git submodule 与目录内嵌套独立仓库：变更聚合、仓库切换、误暂存/误删防护）。
 
 ## 功能全景（六域）
 
@@ -30,6 +30,18 @@
 | ⚙️ 设置 | **Remote 管理**：列表（fetch / push URL）、添加、重命名、删除；**Config 读写**：local / global 切换、key-value 表编辑、添加、删除 |
 | 🎨 主题适配 | 颜色全部走 DSH 设计 token（主按钮与输入框发送按钮同色），明暗主题自动跟随 |
 
+## 子仓库（submodule + 嵌套独立仓库）
+
+面板把工作区里的 git 仓库组织成一棵「仓库树」，两类子仓库统一支持：
+
+- **git submodule**（`.gitmodules` 注册，含未初始化 / 指针不符 / 冲突状态识别）与**嵌套独立仓库**（目录里有自己的 `.git`、未注册为 submodule 的克隆）。
+- **变更 Tab 聚合**：文件列表按仓库分组（主仓库在最上，其余按相对路径排序），每组组头带分支 / 脏计数 / 子模块状态徽标；组内暂存 / 取消暂存 / 丢弃 / diff / blame / 文件历史 / hunk 操作全部作用于该组仓库自身。子模块指针变更显示「指针 abc123d → def456e」，可直接暂存新指针或「进入」子仓库处理内容改动。
+- **仓库切换器**：分支 / 历史 / 冲突 / Worktree / 设置五个 Tab 顶部一键切换当前仓库，Fetch / Pull / Push 与全部操作跟随所选仓库；提交框也可选目标仓库。
+- **指针 diff 与跳转**：子模块指针变更在 diff 窗口显示「指针 abc123d → def456e」，可一键「在子仓库中查看 a..b」——自动切作用域、切历史 Tab 并发起范围对比；指针提交不在子仓库对象库时按钮自动禁用。
+- **指针冲突解决**：合并产生的子模块指针冲突在冲突 Tab 提供「用我们的指针 / 用他们的指针」（指针没有可编辑文本，不提供手动编辑）。
+- **安全防护**：嵌套独立仓库不会被「暂存全部」误折成意外 gitlink（自动 exclude），也不会被「删除全部未跟踪」连历史一起删掉（自动跳过并提示；未跟踪目录已支持整目录递归丢弃）。
+- **submodule 管理（设置 Tab「子仓库」管理区）**：子模块行提供 更新 / 同步 url / 卸载（危险二次确认）/ 进入，未初始化子模块一键「初始化并拉取」（变更 Tab 组头也有同款「初始化」按钮）；「添加子模块」表单支持本地路径 url（自动放行 file 协议）；**嵌套独立仓库可就地「注册为 submodule」**（目录内容不动，仅写 .gitmodules 与 gitlink，需配置 remote.origin.url）；多仓库时头部提供「Fetch 全部 / Pull 全部」（串行逐仓库、单点失败不中断、结束聚合汇总成功/失败）。
+
 ## 仓库感知入口与面板
 
 | 功能 | 说明 |
@@ -44,8 +56,9 @@ Host 侧 `gitManager` 服务暴露的 Remote 方法（客户端 RPC 唯一入口
 | 方法 | 用途 |
 |---|---|
 | `probe` / `overview` / `status` | 仓库探测（是否 git 仓库、当前分支）与整体状态概览 |
+| **`repoTree`** | **子仓库树发现：主仓库 + 全部 submodule（含未初始化）+ 嵌套独立仓库，每节点带分支与脏计数摘要** |
 | `diff` / **`stageHunk`** | 查看工作区 diff；**按 hunk 序号暂存单个块**（`git apply --cached`） |
-| `stage` / `unstage` / `discard` | 文件级暂存 / 取消暂存 / 丢弃（含未跟踪） |
+| `stage` / `unstage` / `discard` | 文件级暂存 / 取消暂存 / 丢弃（含未跟踪）；**stage 支持 `exclude`（「暂存全部」排除嵌套仓库目录，防意外 gitlink）、discard 返回 `skipped`（含 .git 的嵌套仓库被保护跳过）** |
 | `commit` | 提交（支持 amend、全部暂存并提交） |
 | **`stashList` / `stashPush` / `stashPop` / `stashApply` / `stashDrop` / `stashClear`** | **stash 全家：列表、暂存（可含未跟踪）、弹出、应用、删除、清空** |
 | `branches` / `branchCreate` / `branchDelete` / `branchRename` / `merge` | 分支列表与新建 / 删除 / 改名 / 合并 |

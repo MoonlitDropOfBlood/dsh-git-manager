@@ -11,8 +11,8 @@
 
 import { execFile } from "node:child_process";
 import { rm, writeFile, readFile } from "node:fs/promises";
-import { existsSync, statSync } from "node:fs";
-import { resolve, join, sep } from "node:path";
+import { existsSync, statSync, readdirSync } from "node:fs";
+import { resolve, join, sep, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 
@@ -106,6 +106,45 @@ export function safeJoin(toplevel, rel) {
     throw new GitError("exit", "非法路径（越出仓库根目录）：" + rel);
   }
   return abs;
+}
+
+// 子仓库 containment 校验（子仓库支持 §4.5 / 方案 §4.5）：
+// 与 safeJoin 同一道闸、同一套归一化教训——先 resolve(root) 再前缀判定。
+// 区别：入参 p 是「候选仓库的绝对路径」（client 传回来的 activeRepo.path），
+// 不是仓库内相对路径；相对路径同样按 root 解析，返回归一化后的绝对路径。
+// Windows 路径大小写不敏感（方案 §5.3）：比较前统一小写，否则 D:\Repo 与
+// d:\repo 互判越界；POSIX 上大小写敏感，保持原样。
+export function validateRepoPath(rootToplevel, p) {
+  if (typeof rootToplevel !== "string" || rootToplevel.length === 0) {
+    throw new GitError("exit", "非法路径：仓库根为空");
+  }
+  if (typeof p !== "string" || p.length === 0) {
+    throw new GitError("exit", "非法路径：路径为空");
+  }
+  const norm = (s) => (process.platform === "win32" ? s.toLowerCase() : s);
+  const root = resolve(rootToplevel);
+  const abs = resolve(root, p);
+  const rootKey = norm(root);
+  const absKey = norm(abs);
+  const rootWithSepKey = rootKey.endsWith(sep) ? rootKey : rootKey + sep;
+  if (absKey !== rootKey && !absKey.startsWith(rootWithSepKey)) {
+    throw new GitError("exit", "非法路径（越出仓库根目录）：" + p);
+  }
+  return abs;
+}
+
+// 路径等价判定（大小写不敏感仅在 Windows 生效）：去重 / 「toplevel 就是这个目录」
+// 的自检共用（方案 §5.3）。
+function samePath(a, b) {
+  const x = resolve(a);
+  const y = resolve(b);
+  return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+// 相对路径 → posix 归一（子仓库发现的三路来源——submodule status / ls-files -z /
+// 调用方——分隔符不统一，统一成正斜杠再当 id 用）
+function toPosixRel(p) {
+  return String(p == null ? "" : p).split(/[\\/]+/).filter(Boolean).join("/");
 }
 
 // ============================================================================
@@ -345,20 +384,28 @@ export function parseStatusV2(text) {
       const y = parts[1][1];
       const path = parts.slice(8).join(" ");
       if (x !== "." && x !== "?") {
-        result.staged.push({ path, x, y, kind: mapXYChar(x) });
+        const entry = { path, x, y, kind: mapXYChar(x) };
+        attachSubFields(entry, parts[2], parts[3], parts[4], parts[6], parts[7]);
+        result.staged.push(entry);
       }
       if (y !== "." && y !== "?") {
-        result.unstaged.push({ path, x, y, kind: mapXYChar(y) });
+        const entry = { path, x, y, kind: mapXYChar(y) };
+        attachSubFields(entry, parts[2], parts[3], parts[4], parts[6], parts[7]);
+        result.unstaged.push(entry);
       }
     } else if (type === "2") {
       const x = parts[1][0];
       const y = parts[1][1];
       const path = parts.slice(9).join(" ");
       if (x !== "." && x !== "?") {
-        result.staged.push({ path, x, y, kind: "renamed", oldPath: e.origPath || "" });
+        const entry = { path, x, y, kind: "renamed", oldPath: e.origPath || "" };
+        attachSubFields(entry, parts[2], parts[3], parts[4], parts[6], parts[7]);
+        result.staged.push(entry);
       }
       if (y !== "." && y !== "?") {
-        result.unstaged.push({ path, x, y, kind: "renamed", oldPath: e.origPath || "" });
+        const entry = { path, x, y, kind: "renamed", oldPath: e.origPath || "" };
+        attachSubFields(entry, parts[2], parts[3], parts[4], parts[6], parts[7]);
+        result.unstaged.push(entry);
       }
     } else if (type === "u") {
       const xy = parts[1];
@@ -371,6 +418,28 @@ export function parseStatusV2(text) {
     if (tok.startsWith("? ")) result.untracked.push(tok.slice(2));
   }
   return result;
+}
+
+// 子仓库语义挂载（子仓库支持 §2.3）：type 1/2 行第 3 列 <sub>、第 4/5 列 mode 与第 7/8 列 hH/hI。
+//   - subState：<sub> 形如 "N..."（非子模块）/ "SC.."（S=子模块, C=指针变更,
+//     第三位=已跟踪内容脏, 第四位=未跟踪内容脏）。原样字符串挂载，非 N 才挂 key。
+//   - gitlink：仅 mode 160000（gitlink 条目）且 hH（HEAD 侧）/ hI（index 侧）都是
+//     40 位 sha 且不相等 → staged 的 gitlink 指针变更（实测
+//     `1 M. S... 160000 160000 160000 <hH> <hI> libs/inner`）。
+//     mode 收窄是必须的：普通已暂存文件的 hH/hI 是 blob sha，同样 40 位且不等
+//     （实测 `1 M. N... 100644 100644 100644 <blob> <blob> m.txt` 会误挂）。
+//     注意 worktree 侧的指针漂移（子模块 checkout 到别的提交、index 未变）hH===hI，
+//     不挂 gitlink——那种由 submodule.status 的 '+' 前缀表达。
+// JSON-safe：可选字段有值才挂 key（AGENTS.md 网关教训）。
+function attachSubFields(entry, sub, mH, mI, hH, hI) {
+  if (typeof sub === "string" && sub.length > 0 && sub[0] !== "N") {
+    entry.subState = sub;
+  }
+  const isGitlinkMode = mH === "160000" || mI === "160000";
+  if (isGitlinkMode && typeof hH === "string" && typeof hI === "string" && hH !== hI
+    && /^[0-9a-f]{40}$/.test(hH) && /^[0-9a-f]{40}$/.test(hI)) {
+    entry.gitlink = { fromSha: hH, toSha: hI };
+  }
 }
 
 function mapXYChar(c) {
@@ -409,6 +478,328 @@ export async function getStatus(cwd) {
     }
   } catch (_) { /* noop */ }
   return Object.assign({}, parsed, { merging, rebasing });
+}
+
+// 状态摘要（纯函数）：从 parseStatusV2/getStatus 的输出算脏计数。
+// repoTree 的每节点摘要与 self-test 共用同一口径——只取计数，不带文件明细。
+export function statusSummary(parsedStatus) {
+  const s = parsedStatus || {};
+  const n = (a) => (Array.isArray(a) ? a.length : 0);
+  return {
+    staged: n(s.staged),
+    unstaged: n(s.unstaged),
+    untracked: n(s.untracked),
+    conflicted: n(s.conflicted),
+  };
+}
+
+// ============================================================================
+// 子仓库发现：listSubRepos（子仓库支持 §2.1 / 方案 §4.1）
+//   输入 rootToplevel，输出 { repos: RepoNode[] }（含 root 自身，root 排第一，
+//   其余按 relPath 字典序）。两路发现源合并去重：
+//     1. submodule 注册链：git submodule status --recursive + .gitmodules 的 name/url
+//     2. 嵌套独立仓库：root 的未跟踪目录（git 折叠的 dir/）逐个 probe
+//   节点语义（JSON-safe：可选字段有值才挂 key，计数恒为数字，字符串无值用 ""）：
+//     任何一步失败只挂 error + dirty 全 0，不炸整体。
+// ============================================================================
+
+// repoTree 每节点要跑 2-3 个 git 进程；不限并发在 Windows 上是进程风暴，
+// 顺序跑则十来个子仓库要 1-2s（方案 §5.4）。取 4 并发。
+const SUBREPO_CONCURRENCY = 4;
+
+// 有限并发 map（零依赖自实现，不引依赖）
+async function mapLimit(items, limit, fn) {
+  const list = Array.isArray(items) ? items : [];
+  const out = new Array(list.length);
+  if (list.length === 0) return out;
+  let next = 0;
+  const workers = [];
+  const n = Math.max(1, Math.min(limit, list.length));
+  for (let i = 0; i < n; i++) {
+    workers.push((async () => {
+      for (;;) {
+        const idx = next++;
+        if (idx >= list.length) return;
+        out[idx] = await fn(list[idx], idx);
+      }
+    })());
+  }
+  await Promise.all(workers);
+  return out;
+}
+
+function gitErrText(e) {
+  if (e && typeof e.message === "string" && e.message.length > 0) return e.message;
+  return String(e);
+}
+
+function emptyDirty() {
+  return { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 };
+}
+
+// 节点骨架（probe 失败时也保证字段齐全：branch ""/headShort ""/dirty 全 0）
+function blankNode(abs, meta) {
+  return {
+    id: meta.relPath,
+    path: abs,
+    relPath: meta.relPath,
+    name: meta.name,
+    kind: meta.kind,
+    depth: meta.relPath === "" ? 0 : meta.relPath.split("/").length,
+    initialized: meta.initialized !== false,
+    branch: "",
+    detached: false,
+    unborn: false,
+    headShort: "",
+    dirty: emptyDirty(),
+  };
+}
+
+// 已知 probe 的仓库 → 节点（status 查询失败只挂 error，不影响其它字段）
+async function nodeFromProbe(abs, meta, probe) {
+  const node = blankNode(abs, meta);
+  node.branch = probe.branch || "";
+  node.detached = !!probe.detached;
+  node.unborn = !!probe.unborn;
+  node.headShort = probe.headShort || "";
+  try {
+    node.dirty = statusSummary(await getStatus(abs));
+  } catch (e) {
+    node.error = gitErrText(e);
+  }
+  return node;
+}
+
+// 未初始化 submodule：没有 .git，语义位全空（unborn 只对有 .git 的仓库有意义）
+function uninitializedSubmoduleNode(abs, relPath, name) {
+  return blankNode(abs, { relPath, name, kind: "submodule", initialized: false });
+}
+
+// `git submodule status --recursive` 解析（纯函数）：
+//   `<前缀><40位sha> <path> (<describe>)`，前缀 ' '正常 / '-'未初始化 /
+//   '+'指针不符 / 'U'冲突。行尾 describe 容忍（路径本身含括号是极端情况，忽略）。
+function parseSubmoduleStatus(text) {
+  const out = [];
+  if (!text) return out;
+  for (const line of String(text).split("\n")) {
+    if (!line) continue;
+    const m = /^([ +\-U])([0-9a-f]{40}) (.*)$/.exec(line);
+    if (!m) continue;
+    let p = m[3];
+    const described = /^(.*) \([^()]*\)$/.exec(p);
+    if (described) p = described[1];
+    const relPath = toPosixRel(p);
+    if (!relPath) continue;
+    out.push({ prefix: m[1], sha: m[2], relPath });
+  }
+  return out;
+}
+
+async function readSubmoduleEntries(rootAbs) {
+  try {
+    const r = await runGit(rootAbs, ["submodule", "status", "--recursive"]);
+    return parseSubmoduleStatus(r.stdout);
+  } catch (_) {
+    return []; // 无 .gitmodules / git 报错 → 无注册子仓库
+  }
+}
+
+// .gitmodules 的 name/url 映射：按 config key 的 <name> 段聚合，
+// 返回 relPath(posix) → { name, url }。文件不存在或无匹配 → 空映射。
+async function readGitmodulesMap(rootAbs) {
+  const byName = new Map();
+  try {
+    const r = await runGit(rootAbs, ["config", "-f", ".gitmodules", "--get-regexp", "^submodule\\..*\\.(path|url)$"]);
+    for (const line of r.stdout.split("\n")) {
+      if (!line) continue;
+      const sp = line.indexOf(" ");
+      if (sp < 0) continue;
+      const key = line.slice(0, sp);
+      const value = line.slice(sp + 1).trim();
+      const m = /^submodule\.(.+)\.(path|url)$/.exec(key);
+      if (!m) continue;
+      const name = m[1];
+      const entry = byName.get(name) || { name, path: "", url: "" };
+      if (m[2] === "path") entry.path = toPosixRel(value);
+      else entry.url = value;
+      byName.set(name, entry);
+    }
+  } catch (_) {
+    return new Map();
+  }
+  const byPath = new Map();
+  for (const entry of byName.values()) {
+    if (entry.path) byPath.set(entry.path, entry);
+  }
+  return byPath;
+}
+
+// root 的未跟踪目录（git 折叠成 `dir/`）：嵌套独立仓库以此形态出现。
+// .gitignore 忽略的不出现，属预期（方案 §5.1 的"未跟踪"口径）。
+// 用 -z：非 -z 时含特殊字符的路径会被 C 风格引号包裹，解析要再反转义。
+async function readUntrackedDirs(rootAbs) {
+  try {
+    const r = await runGit(rootAbs, ["ls-files", "--others", "--directory", "--exclude-standard", "-z"]);
+    const out = [];
+    for (const raw of r.stdout.split("\0")) {
+      if (!raw.endsWith("/")) continue; // 只取折叠的目录条目（文件条目另作他用）
+      const relPath = toPosixRel(raw);
+      if (relPath) out.push(relPath);
+    }
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
+
+// nested 节点的 originUrl（子仓库支持 P2）：在该嵌套仓库读 remote.origin.url，
+// 非空才挂 key（JSON-safe）——供客户端「注册为 submodule」转换用（submoduleAdd
+// 复用同一个 url）。submodule / root 节点不挂：submodule 的 url 已在 .gitmodules
+// （node.submodule.url），root 的 remote 由设置 Tab 管。
+async function attachNestedOrigin(node, abs) {
+  try {
+    const r = await runGit(abs, ["config", "--get", "remote.origin.url"]);
+    const url = r.stdout.trim();
+    if (url) node.originUrl = url;
+  } catch (_) {
+    /* 无 origin remote（exit 1）→ 不挂 key */
+  }
+}
+
+export async function listSubRepos(rootToplevel) {
+  if (typeof rootToplevel !== "string" || rootToplevel.length === 0) {
+    throw new GitError("exit", "repoTree 需要仓库根路径");
+  }
+  const rootAbs = resolve(rootToplevel);
+  const rootProbe = await probeRepo(rootAbs);
+  if (!rootProbe || !rootProbe.isRepo) {
+    throw new GitError("exit", "不是 git 仓库：" + rootAbs);
+  }
+  const rootNode = await nodeFromProbe(
+    rootAbs,
+    { relPath: "", name: basename(rootAbs) || rootAbs, kind: "root" },
+    rootProbe,
+  );
+
+  const [subEntries, modMap] = await Promise.all([
+    readSubmoduleEntries(rootAbs),
+    readGitmodulesMap(rootAbs),
+  ]);
+
+  // ---- 路 1：submodule 注册链 ----
+  const subNodes = await mapLimit(subEntries, SUBREPO_CONCURRENCY, async (entry) => {
+    const relPath = entry.relPath;
+    // 病态 .gitmodules（手改成 ../escape 之类）：safeJoin 抛错 → 该条目不进树，
+    // 但不能炸掉整个 repoTree
+    let abs;
+    try {
+      abs = safeJoin(rootAbs, relPath);
+    } catch (_) {
+      return null;
+    }
+    const mod = modMap.get(relPath);
+    const name = (mod && mod.name) || relPath.split("/").pop() || relPath;
+    // 前缀 '-' = 未初始化：目录可能为空/不存在，不进 probe
+    if (entry.prefix === "-") return uninitializedSubmoduleNode(abs, relPath, name);
+
+    // recordedSha：父仓库 index 记录的 gitlink 指针（取不到给 ""）
+    let recordedSha = "";
+    try {
+      recordedSha = (await runGit(rootAbs, ["rev-parse", "--short=12", ":" + relPath])).stdout.trim();
+    } catch (_) {
+      recordedSha = "";
+    }
+    const meta = { relPath, name, kind: "submodule", initialized: true };
+    let node;
+    try {
+      const probe = await probeRepo(abs);
+      if (!probe || !probe.isRepo) return uninitializedSubmoduleNode(abs, relPath, name);
+      // 必须是独立子仓库：toplevel 就是这个目录本身（否则它落在别的仓库里）
+      if (!samePath(probe.toplevel, abs)) return null;
+      node = await nodeFromProbe(abs, meta, probe);
+    } catch (e) {
+      // probe 抛错（超时/git 缺失…）：节点仍返回，挂 error
+      node = blankNode(abs, meta);
+      node.error = gitErrText(e);
+    }
+    node.submodule = {
+      state: entry.prefix === "U" ? "conflict" : entry.prefix === "+" ? "pointer-mismatch" : "ok",
+      sha: entry.sha.slice(0, 12),
+      recordedSha,
+      url: (mod && mod.url) || "",
+    };
+    return node;
+  });
+
+  // ---- 路 2：嵌套独立仓库（submodule 路覆盖到的跳过：kind 不重复计）----
+  const covered = new Set();
+  for (const n of subNodes) {
+    if (!n) continue;
+    covered.add(process.platform === "win32" ? n.path.toLowerCase() : n.path);
+  }
+  const untrackedDirs = await readUntrackedDirs(rootAbs);
+  const nestedNodes = await mapLimit(untrackedDirs, SUBREPO_CONCURRENCY, async (relPath) => {
+    let abs;
+    try {
+      abs = safeJoin(rootAbs, relPath);
+    } catch (_) {
+      return null;
+    }
+    if (covered.has(process.platform === "win32" ? abs.toLowerCase() : abs)) return null;
+    try {
+      const probe = await probeRepo(abs);
+      // 候选只是「一个未跟踪目录」：不是独立仓库（普通未跟踪目录）或 toplevel
+      // 不是它自己（更深层仓库折叠在同一个未跟踪目录里）→ 都不算节点
+      if (!probe || !probe.isRepo || !samePath(probe.toplevel, abs)) return null;
+      const node = await nodeFromProbe(abs, { relPath, name: basename(abs) || relPath, kind: "nested" }, probe);
+      await attachNestedOrigin(node, abs);
+      return node;
+    } catch (_) {
+      return null; // 探测不出来的候选不是「已知仓库」，不进树
+    }
+  });
+
+  const repos = [rootNode].concat(subNodes, nestedNodes).filter(Boolean);
+  repos.sort((a, b) => {
+    if (a.relPath === "") return b.relPath === "" ? 0 : -1; // root 恒第一
+    if (b.relPath === "") return 1;
+    return a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0;
+  });
+  return { repos };
+}
+
+// revExists：批量校验 sha 是否存在于该仓库对象库（子仓库支持 P1 §3.6）。
+// 用途：历史 Tab 里某个提交改了 gitlink（指针 a→b）时，客户端据此决定
+// 「在子仓库中查看 a..b」按钮是否可用——浅克隆 / GC 掉旧指针时 a 或 b 可能不在
+// 子仓库的本地对象库里，此时必须禁用跳转而不是让 diffRange 报未知修订。
+// 返回形状恒 JSON-safe：{ checks: [{ rev, ok }] }，顺序与入参一致。
+//
+// 入参白名单比 checkRev 严得多：只收纯十六进制 sha（7-40 位）。checkRev 放行的
+// 「HEAD~3 / @{yesterday} / 任意分支名」在这里一律拒绝——因为拼 ^{commit}
+// 后缀后仍会进 argv，表达式形态（如 "a..b"、"--upload-pack"）是注入面，
+// 而这里的需求本来就只要「一个 sha 在不在」。后缀由本函数内部拼接，调用方无法注入。
+const REV_EXISTS_SHA_RE = /^[0-9a-fA-F]{7,40}$/;
+export async function revExists(cwd, revs) {
+  const list = Array.isArray(revs) ? revs : [];
+  const checks = [];
+  for (const raw of list) {
+    if (typeof raw !== "string" || !REV_EXISTS_SHA_RE.test(raw)) {
+      throw new GitError("exit", "revExists 非法 sha：" + String(raw));
+    }
+    let ok = false;
+    try {
+      // --verify + --quiet：不存在（含非 commit 对象）时 exit 1 且无输出
+      await runGit(cwd, ["rev-parse", "--verify", "--quiet", raw + "^{commit}"]);
+      ok = true;
+    } catch (e) {
+      // 只有「确实不存在」这一种 exit 1 被吞成 ok:false；非仓库（128）、
+      // 超时、git 缺失等一律上抛，让 Host 入口照常映射错误码
+      if (e instanceof GitError && e.kind === "exit" && e.exitCode === 1) ok = false;
+      else throw e;
+    }
+    checks.push({ rev: raw, ok });
+  }
+  return { checks };
 }
 
 // ============================================================================
@@ -990,9 +1381,20 @@ export async function stageHunkFile(cwd, opts = {}) {
 // 变更：stage / unstage / discard / commit
 // ============================================================================
 
-export async function stageFiles(cwd, files, all) {
+// stage：all=true 时整仓暂存，可带 exclude（相对路径数组，仓库根相对）。
+//   exclude 只在 all=true 时生效——files 模式按调用方给的路径逐条 add，忽略它。
+//   用途（子仓库支持 §5.1）：「暂存全部」要把嵌套独立仓库目录排除掉，否则
+//   `git add dir/` 会把它折成一个意外 gitlink（不在 .gitmodules 里的嵌入仓库）。
+export async function stageFiles(cwd, files, all, exclude) {
   if (all) {
-    await runGit(cwd, ["add", "-A"]);
+    const ex = Array.isArray(exclude)
+      ? exclude.filter((e) => typeof e === "string" && e.length > 0)
+      : [];
+    if (ex.length > 0) {
+      await runGit(cwd, ["add", "-A", "--", "."].concat(ex.map((e) => ":(exclude)" + e)));
+    } else {
+      await runGit(cwd, ["add", "-A"]);
+    }
   } else {
     if (!Array.isArray(files) || files.length === 0) throw new GitError("exit", "stage 需要 files 或 all=true");
     await runGit(cwd, ["add", "--"].concat(files));
@@ -1031,11 +1433,23 @@ export async function discardFiles(cwd, files, includeUntracked) {
   if (tracked.length > 0) {
     await runGit(cwd, ["restore", "--worktree", "--"].concat(tracked));
   }
+  const skipped = [];
   if (includeUntracked && toDelete.length > 0) {
     for (const f of toDelete) {
       const abs = safeJoin(probe.toplevel, f);
+      // 嵌套仓库保护（子仓库支持 §5.1）：路径自身或其子树里只要有 .git（文件=
+      // 子模块的 gitdir 指针，目录=嵌套独立仓库），一律跳过不删——rm -rf 会把
+      // 用户整个子仓库连历史一起抹掉，而 UI 上点的是「丢弃未跟踪文件」。
+      if (containsGitDir(abs)) {
+        skipped.push(f);
+        continue;
+      }
       try {
-        await rm(abs, { force: true });
+        // recursive：未跟踪清单来自 --untracked-files=normal，未跟踪目录是折叠
+        // 形态（"dir/"），不带 recursive 时 rm 对目录报 EISDIR 且被下面的吞错
+        // 吃掉——用户点了「丢弃未跟踪文件」目录却还在（子仓库支持 P1）。
+        // 防护顺序不变：containsGitDir 判定始终在删除之前。
+        await rm(abs, { force: true, recursive: true });
       } catch (_) { /* missing 是正常的 */ }
     }
   }
@@ -1043,7 +1457,39 @@ export async function discardFiles(cwd, files, includeUntracked) {
   // 同时带 merging/rebasing 给客户端（避免 banner 漏掉：见 self-test §4.7.4）
   status.merging = existsSync(join(gitDirAbs, "MERGE_HEAD"));
   status.rebasing = existsSync(join(gitDirAbs, "rebase-merge")) || existsSync(join(gitDirAbs, "rebase-apply"));
+  // 仅非空时挂 key（JSON-safe：显式 undefined 的 own key 会被网关拒绝）。
+  // Host 入口会把它提到 envelope 的 { status, skipped } 上。
+  if (skipped.length > 0) status.skipped = skipped;
   return status;
+}
+
+// 待删除路径里是否存在 .git（自身或子树）：嵌套仓库保护（方案 §5.1）。
+// 有界扫描——未跟踪目录可能是个巨大的 clone，不设上限会让「丢弃未跟踪文件」卡住。
+// 预算取值（子仓库支持 P1：4/400 → 6/2000）：删除改为递归之后，漏检的代价从
+// 「目录没删掉」变成「连子仓库历史一起删光」→ 向检出保守方向放宽；预算仍有界，
+// 且 readdirSync 极快（2000 项是毫秒级），不会成为 UI 卡顿源。
+const NESTED_SCAN_MAX_DEPTH = 6;
+const NESTED_SCAN_MAX_ENTRIES = 2000;
+function containsGitDir(abs) {
+  let budget = NESTED_SCAN_MAX_ENTRIES;
+  const walk = (dir, depth) => {
+    if (budget <= 0 || depth > NESTED_SCAN_MAX_DEPTH) return false;
+    if (existsSync(join(dir, ".git"))) return true;
+    if (depth === NESTED_SCAN_MAX_DEPTH) return false;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (_) {
+      return false; // 不是目录 / 读不了 → 交给调用方的 rm 处理
+    }
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      if (budget-- <= 0) return false;
+      if (walk(join(dir, ent.name), depth + 1)) return true;
+    }
+    return false;
+  };
+  return walk(abs, 0);
 }
 
 export async function commitStaged(cwd, message, amend) {
@@ -1240,8 +1686,78 @@ export async function getConflictContent(cwd, file) {
   return out;
 }
 
+// 该路径当前的未合并条目（`git ls-files -u -- <file>`）：
+// 每行「<mode> <sha> <stage>\t<path>」，解析成 { mode, sha, stage }[]。
+// 必须在仓库 toplevel 跑：ls-files 的 pathspec 以仓库根下的相对路径解释，
+// cwd 在子目录时传同一个相对路径匹配不到。非仓库 / 无未合并条目 → 空数组
+// （调用方据此回落普通文本冲突逻辑，绝不因此中断既有路径）。
+async function readUnmergedEntries(toplevel, file) {
+  if (!toplevel) return [];
+  let stdout = "";
+  try {
+    stdout = (await runGit(toplevel, ["ls-files", "-u", "--", file])).stdout;
+  } catch (_) {
+    return []; // 非仓库 / 该路径无未合并条目
+  }
+  const out = [];
+  for (const line of String(stdout || "").split("\n")) {
+    const m = /^(\d{6})\s+([0-9a-f]{40})\s+([123])\t/.exec(line);
+    if (m) out.push({ mode: m[1], sha: m[2], stage: Number(m[3]) });
+  }
+  return out;
+}
+
+// 把某个 gitlink 冲突解析到指定指针（子仓库支持 P1）。
+//
+// 为什么不用 `git checkout --ours/--theirs -- <gitlink>`（实测 git 2.53）：
+// 对 mode 160000 的未合并条目，这两个选项对 index 是**静默空操作**——三个 stage
+// 原样留着，退出码 0、无输出；随后的 `git add` 记的是子仓库**工作区当前 HEAD**
+// （合并冲突时 git 已把子模块切到某一侧），于是「选我们的」实际落成对方的指针。
+// 这里改用两条底层命令把「选哪一侧」表达准确：
+//   1. index：`git update-index --cacheinfo 160000,<sha>,<file>` 直接把选中的
+//      stage2/stage3 指针写成 stage0——这就是子仓库被 checkout 到该 sha 后
+//      `git add` 会写下的东西，冲突随之解除；选中侧是「删除」（该 stage 不存在）
+//      时用 `--force-remove` 把 gitlink 条目从 index 摘掉。
+//   2. 子仓库工作区：best-effort 同步到同一指针，否则 status 会留下
+//      "modified: libs/base (new commits)" 漂移。**只在子仓库干净时**切，
+//      有本地改动/对象缺失一律保持原样（漂移可见可恢复，绝不丢弃子仓库里的工作）。
+async function resolveGitlinkConflict(toplevel, file, subAbs, stage, unmerged) {
+  const picked = unmerged.find((e) => e.stage === stage && e.mode === "160000");
+  if (!picked) {
+    // 选中的一侧删掉了这个子模块 → 解析即「index 里不再有这个 gitlink」
+    await runGit(toplevel, ["update-index", "--force-remove", "--", file]);
+    return;
+  }
+  await runGit(toplevel, ["update-index", "--add", "--cacheinfo", "160000," + picked.sha + "," + file]);
+  try {
+    const head = (await runGit(subAbs, ["rev-parse", "HEAD"])).stdout.trim();
+    if (head === picked.sha) return;
+    if ((await runGit(subAbs, ["status", "--porcelain"])).stdout.trim().length > 0) return;
+    await runGit(subAbs, ["checkout", "--detach", picked.sha]);
+  } catch (_) { /* 子仓库不可用/对象不在本地：index 已解析，漂移由用户自行处理 */ }
+}
+
 export async function resolveConflictFile(cwd, file, strategy, content) {
   if (typeof file !== "string") throw new GitError("exit", "resolveConflict 需要 file");
+  // probe 只跑一次：gitlink 分派与 custom 的路径防护共用（AGENTS.md：不重复 probe）
+  const probe = await probeRepo(cwd);
+
+  // gitlink（子模块指针，index mode 160000）冲突分派（子仓库支持 P1 / 方案 §2.3）：
+  // 冲突对象是「指针」不是文件内容，没有可编辑文本 → custom 直接拒绝；
+  // ours = stage2、theirs = stage3。其余 strategy 沿用原报错。
+  const unmerged = probe && probe.isRepo ? await readUnmergedEntries(probe.toplevel, file) : [];
+  if (unmerged.some((e) => e.mode === "160000")) {
+    if (strategy === "custom") {
+      throw new GitError("exit", "子模块指针冲突不支持手动编辑内容");
+    }
+    if (strategy !== "ours" && strategy !== "theirs") {
+      throw new GitError("exit", "未知 strategy：" + strategy);
+    }
+    const abs = safeJoin(probe.toplevel, file); // 路径防护（绝对路径 / .. 越界拒绝），与 custom 同款
+    await resolveGitlinkConflict(probe.toplevel, file, abs, strategy === "ours" ? 2 : 3, unmerged);
+    return getStatus(cwd);
+  }
+
   if (strategy === "ours") {
     await runGit(cwd, ["checkout", "--ours", "--", file]);
     await runGit(cwd, ["add", "--", file]);
@@ -1249,7 +1765,6 @@ export async function resolveConflictFile(cwd, file, strategy, content) {
     await runGit(cwd, ["checkout", "--theirs", "--", file]);
     await runGit(cwd, ["add", "--", file]);
   } else if (strategy === "custom") {
-    const probe = await probeRepo(cwd);
     if (!probe.isRepo) throw new GitError("not-a-repo", "resolveConflict：仓库不可用");
     const abs = safeJoin(probe.toplevel, file);
     await writeFile(abs, content || "", "utf8");
@@ -2067,4 +2582,144 @@ export async function unsetConfig(cwd, key, global) {
   checkConfigKey(key, "configUnset");
   await runGit(cwd, ["config"].concat(configScopeArgs(!!global)).concat(["--unset-all", key]));
   return getConfig(cwd, global);
+}
+
+// ============================================================================
+// 子仓库支持 P2（2026-10-13）：submodule 管理五方法
+//   init / update / sync / deinit / add。契约：位置参数是**仓库内路径**（相对
+//   toplevel），不是 .gitmodules 里的注册名——git CLI 的这五个子命令收的就是路径
+//   （方案 §2.2 表格里的 `name?` 已据此修正为 `subPath`；只有 add 的 --name 才是
+//   注册名）。所有 subPath 过 safeJoin 防护后才进 argv（与 mode/discard 同款）。
+//   update / add 可能触发 clone（走网络）→ 用 runGitNet（180s），其余 runGit。
+// ============================================================================
+
+// submodule 注册名白名单（仅 submoduleAdd 的 --name 用）：submodule name 会被当作
+// config key `submodule.<name>.path` / `.url` 的一段，git 的 config 解析比
+// check-ref-format 宽，故此处按 checkRefName 同款收紧：非空；禁空白与 ~^:?*[\；
+// 禁 - 与 . 开头（前者会被 git 当选项，后者是保留的相对路径标记）；禁 ..；
+// 禁 / 结尾。不含通用的 ".."→ 已单列。
+export function checkSubmoduleName(name, label) {
+  if (typeof name !== "string" || name.length === 0) {
+    throw new GitError("exit", (label || "submodule") + " 需要 name");
+  }
+  const bad = name.startsWith("-") || name.startsWith(".")
+    || name.endsWith("/") || name.includes("..")
+    || /[\s~^:?*\[\\]/.test(name);
+  if (bad) throw new GitError("exit", (label || "submodule") + " 非法名称：" + name);
+  return name;
+}
+
+// url 白名单：非空、无空白（换行/空格会让 argv 与日志语义都不可控）、禁 - 开头
+// （防选项注入）。其余合法性交给 git 自己报错（协议不支持等）。
+function checkSubmoduleUrl(url) {
+  if (typeof url !== "string" || url.length === 0 || /\s/.test(url) || url.startsWith("-")) {
+    throw new GitError("exit", "submoduleAdd 需要合法 url");
+  }
+  return url;
+}
+
+// 本地路径 url 判定：git 2.38+ 默认 protocol.file.allow=user，主要防的是「不可信
+// .gitmodules 连锁触发 file 传输」（克隆攻击面），而这里的 url 是用户在 UI 里
+// 显式输入/选择的，属用户自己点的那一下 → 自动前置 -c protocol.file.allow=always
+// 是合理的（UNC 路径 \\server\share 同属本地，一并覆盖）。
+function isLocalSubmoduleUrl(url) {
+  return existsSync(url)
+    || url.startsWith("./") || url.startsWith("../")
+    || url.startsWith("/") || url.startsWith("\\\\")
+    || /^[a-zA-Z]:[\\/]/.test(url);
+}
+
+// 五个 submodule 方法共用的入口归一：cwd 可能是仓库内子目录 → 先 probeRepo 取
+// toplevel，全部命令在 toplevel 跑（git submodule 对 cwd 敏感）；subPath 相对
+// toplevel 过 safeJoin（拒绝绝对路径与 .. 越界），返回 posix 形态进 argv。
+// subPath 缺省合法（= 全量），required=true 时（deinit/add）缺省即抛错。
+async function resolveSubmoduleTarget(cwd, subPath, opts = {}) {
+  const probe = await probeRepo(cwd);
+  if (!probe || !probe.isRepo) {
+    throw new GitError("exit", (opts.label || "submodule") + "：路径不是 git 仓库：" + cwd);
+  }
+  const toplevel = resolve(probe.toplevel);
+  if (subPath == null || subPath === "") {
+    if (opts.required) {
+      throw new GitError("exit", (opts.label || "submodule") + " 需要 subPath");
+    }
+    return { toplevel, subPath: null };
+  }
+  safeJoin(toplevel, subPath);
+  return { toplevel, subPath: toPosixRel(subPath) };
+}
+
+export async function submoduleInit(cwd, subPath) {
+  const t = await resolveSubmoduleTarget(cwd, subPath, { label: "submoduleInit" });
+  const args = ["submodule", "init"];
+  if (t.subPath) args.push("--", t.subPath);
+  await runGit(t.toplevel, args);
+  return { status: await getStatus(t.toplevel) };
+}
+
+export async function submoduleUpdate(cwd, opts) {
+  const o = opts || {};
+  const t = await resolveSubmoduleTarget(cwd, o.subPath, { label: "submoduleUpdate" });
+  const args = ["submodule", "update"];
+  if (o.init) args.push("--init");
+  if (o.recursive) args.push("--recursive");
+  if (t.subPath) args.push("--", t.subPath);
+  // 首次 update 会 clone（走网络）→ 长超时
+  await runGitNet(t.toplevel, args);
+  return { status: await getStatus(t.toplevel) };
+}
+
+export async function submoduleSync(cwd, subPath) {
+  const t = await resolveSubmoduleTarget(cwd, subPath, { label: "submoduleSync" });
+  const args = ["submodule", "sync"];
+  if (t.subPath) args.push("--", t.subPath);
+  await runGit(t.toplevel, args);
+  return { status: await getStatus(t.toplevel) };
+}
+
+// deinit 是危险操作（清空子模块工作区目录 + 注销本地配置，.gitmodules 保留），
+// 契约要求 subPath 必填：不带 -- 的 deinit 会清空**全部**子模块。
+export async function submoduleDeinit(cwd, subPath, force) {
+  const t = await resolveSubmoduleTarget(cwd, subPath, { label: "submoduleDeinit", required: true });
+  const args = ["submodule", "deinit"];
+  if (force) args.push("-f");
+  args.push("--", t.subPath);
+  await runGit(t.toplevel, args);
+  return { status: await getStatus(t.toplevel) };
+}
+
+export async function submoduleAdd(cwd, opts) {
+  const o = opts || {};
+  const url = checkSubmoduleUrl(o.url);
+  const probe = await probeRepo(cwd);
+  if (!probe || !probe.isRepo) {
+    throw new GitError("exit", "submoduleAdd：路径不是 git 仓库：" + cwd);
+  }
+  const toplevel = resolve(probe.toplevel);
+  if (o.subPath == null || o.subPath === "") {
+    throw new GitError("exit", "submoduleAdd 需要 subPath");
+  }
+  // 路径防护先过（越界/绝对路径在跑命令前就拒掉）
+  const abs = safeJoin(toplevel, o.subPath);
+  const subPath = toPosixRel(o.subPath);
+  const args = [];
+  if (isLocalSubmoduleUrl(url)) args.push("-c", "protocol.file.allow=always");
+  args.push("submodule", "add");
+  // name 可选（缺省 git 按 remote 仓库名派生）；给了就过注册名白名单
+  if (o.name != null && o.name !== "") args.push("--name", checkSubmoduleName(o.name, "submoduleAdd"));
+  args.push("--", url, subPath);
+  // clone 可能走网络 → 长超时；失败（目录已存在且非空 / url 不可达等）按 GitError 上抛
+  try {
+    await runGitNet(toplevel, args);
+  } catch (e) {
+    // git 2.38+ 对「.git/modules/<name> 有同名残留」的路径拒绝 add
+    //（fatal: A git directory for '...' is found locally）——卸载后重加、
+    // 嵌套仓库就地注册都会撞上。按 git 自己的提示用 --force 复用本地对象库
+    // 重试一次（此处本就是用户显式操作，且 url 已过白名单）。
+    if (!(e instanceof GitError) || !/found locally/.test(e.stderr || "")) throw e;
+    const forceArgs = args.slice();
+    forceArgs.splice(forceArgs.indexOf("submodule") + 1, 0, "--force");
+    await runGitNet(toplevel, forceArgs);
+  }
+  return { status: await getStatus(toplevel), probe: await probeRepo(abs) };
 }

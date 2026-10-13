@@ -24,12 +24,23 @@ const errorSchema = z.object({
   message: z.string().readonly(),
 }).readonly();
 
+// status 的文件条目：子仓库支持 P0 新增两个可选字段（有值才挂 key，
+// 否则网关 assertJsonValue 拒绝显式 undefined 的 own key——见 AGENTS.md）
+//   subState —— porcelain v2 <sub> 原样字符串（"SC.." 等，仅非 "N" 时存在）
+//   gitlink  —— staged 的 gitlink 指针变更：hH/hI 均为 40 位 sha 且不相等
+const gitlinkSchema = z.object({
+  fromSha: z.string().readonly(),
+  toSha: z.string().readonly(),
+}).readonly();
+
 const fileEntrySchema = z.object({
   path: z.string().readonly(),
   oldPath: z.string().readonly().optional(),
   x: z.string().readonly().optional(),
   y: z.string().readonly().optional(),
   kind: z.string().readonly(),
+  subState: z.string().readonly().optional(),
+  gitlink: gitlinkSchema.optional(),
 }).readonly();
 
 const conflictEntrySchema = z.object({
@@ -166,6 +177,50 @@ const configEntrySchema = z.object({
   value: z.string().readonly(),
 }).readonly();
 
+// ---- 子仓库支持 P0（2026-10-13）：仓库树 RepoNode ----
+// 可选字段一律 .optional() 且 Host 侧「有值才挂 key」；字符串无值用 ""、
+// 计数恒为数字（不挂 null/undefined）。
+
+const repoDirtySchema = z.object({
+  staged: z.number().readonly(),
+  unstaged: z.number().readonly(),
+  untracked: z.number().readonly(),
+  conflicted: z.number().readonly(),
+}).readonly();
+
+// 只在 kind==="submodule" 且 initialized=true 时存在（未初始化节点不挂 key）
+const repoSubmoduleSchema = z.object({
+  state: z.enum(["ok", "pointer-mismatch", "conflict"]).readonly(),
+  sha: z.string().readonly(),
+  recordedSha: z.string().readonly(),
+  url: z.string().readonly(),
+}).readonly();
+
+const repoNodeSchema = z.object({
+  id: z.string().readonly(),
+  path: z.string().readonly(),
+  relPath: z.string().readonly(),
+  name: z.string().readonly(),
+  kind: z.enum(["root", "submodule", "nested"]).readonly(),
+  depth: z.number().readonly(),
+  initialized: z.boolean().readonly(),
+  branch: z.string().readonly(),
+  detached: z.boolean().readonly(),
+  unborn: z.boolean().readonly(),
+  headShort: z.string().readonly(),
+  dirty: repoDirtySchema,
+  // 仅当该节点 probe/status 查询失败时挂（节点仍返回，dirty 全 0）
+  error: z.string().readonly().optional(),
+  // 仅 kind==="nested" 且该仓库有 origin remote 时挂（P2：供客户端「注册为
+  // submodule」转换用）。submodule/root 不挂——submodule 的 url 在 submodule.url。
+  originUrl: z.string().readonly().optional(),
+  submodule: repoSubmoduleSchema.optional(),
+}).readonly();
+
+const repoTreeValueSchema = z.object({
+  repos: z.array(repoNodeSchema).readonly(),
+}).readonly();
+
 // P3-A §8.1：rebase todo 条目（action ∈ pick|squash|fixup|drop|edit，Host 枚举校验；
 // message 仅 squash 有值才挂）
 const rebaseTodoSchema = z.object({
@@ -265,6 +320,13 @@ const cherryPickResult = result(cherryPickValueSchema);
 const fetchResult = netResult(fetchValueSchema);
 const worktreeMutResult = result(worktreesValueSchema);
 const initResult = result(z.object({ probe: probeSchema }).readonly());
+// discard 与其它变更方法不同款：除 status 外还可能带 skipped（未跟踪清理时
+// 含 .git 的嵌套仓库路径被跳过不删；有值才挂 key）
+const discardValueSchema = z.object({
+  status: statusSchema,
+  skipped: z.array(z.string().readonly()).readonly().optional(),
+}).readonly();
+const discardResult = result(discardValueSchema);
 
 // ---- v2 §2.2/§2.3 新增 result schemas -----------------------------------
 
@@ -316,6 +378,70 @@ const rebaseRunResult = result(rebaseDoneValueSchema);
 const fixupResult = result(rebaseDoneValueSchema);
 const rebaseBranchResult = result(rebaseDoneValueSchema);
 
+// ---- 子仓库支持 P0（2026-10-13）：repoTree ----
+const repoTreeResult = result(repoTreeValueSchema);
+
+// ---- 子仓库支持 P1：revExists（sha 存在性门控）----
+// 恒为数组（空数组合法）；ok:false = 该 sha 不在这个仓库的对象库里（跳转禁用），
+// 非法 sha 由 git-core 抛错走错误信封，不会混进 checks 里。
+const revExistsValueSchema = z.object({
+  checks: z.array(z.object({
+    rev: z.string().readonly(),
+    ok: z.boolean().readonly(),
+  }).readonly()).readonly(),
+}).readonly();
+const revExistsResult = result(revExistsValueSchema);
+
+// ---- 子仓库支持 P2（2026-10-13）：submodule 管理五方法 ----
+// 前四个与其它变更方法同款：{ status }；submoduleAdd 额外带新子仓库 probe，
+// 客户端可直接把新节点插进仓库树。
+const submoduleAddValueSchema = z.object({
+  status: statusSchema,
+  probe: probeSchema,
+}).readonly();
+const submoduleAddResult = result(submoduleAddValueSchema);
+
+// per-method 请求补充字段（基础形态是 passthrough 的 z.object({})，这里给个别方法
+// 显式声明新增的可选入参；其余键仍由 passthrough 放行）
+const REQUEST_SHAPES = {
+  // stage {all:true} 时排除嵌套独立仓库目录（方案 §5.1：暂存它会变成意外 gitlink）；
+  // files 模式忽略该参数
+  stage: {
+    exclude: z.array(z.string().readonly()).readonly().optional(),
+  },
+  // path 由 passthrough 放行；revs 只接受字符串数组（元素级 sha 白名单在 git-core）
+  revExists: {
+    revs: z.array(z.string().readonly()).readonly(),
+  },
+  // submodule 管理五方法（子仓库支持 P2）。位置参数是「仓库内路径」（相对
+  // toplevel，git submodule 子命令收路径而非注册名），越界防护在 git-core 的
+  // safeJoin；deinit 必填（缺省会清空全部子模块）。
+  submoduleInit: {
+    subPath: z.string().readonly().optional(),
+  },
+  submoduleUpdate: {
+    subPath: z.string().readonly().optional(),
+    init: z.boolean().readonly().optional(),
+    recursive: z.boolean().readonly().optional(),
+  },
+  submoduleSync: {
+    subPath: z.string().readonly().optional(),
+  },
+  submoduleDeinit: {
+    subPath: z.string().readonly(),
+  },
+  submoduleAdd: {
+    url: z.string().readonly(),
+    subPath: z.string().readonly(),
+    name: z.string().readonly().optional(),
+  },
+};
+
+function requestSchemaOf(method) {
+  const shape = REQUEST_SHAPES[method];
+  return shape ? z.object(shape).passthrough() : z.object({}).passthrough();
+}
+
 // ---- manifest ------------------------------------------------------------
 
 const METHODS = [
@@ -330,7 +456,7 @@ const METHODS = [
   ["conflictContent", conflictContentResult],
   ["stage", mutationResult],
   ["unstage", mutationResult],
-  ["discard", mutationResult],
+  ["discard", discardResult],
   ["hunkApply", mutationResult],
   ["commit", commitResult],
   ["branchCreate", mutationResult],
@@ -378,6 +504,16 @@ const METHODS = [
   ["fixupCommit", fixupResult],
   ["rebaseBranch", rebaseBranchResult],
   ["lineApply", mutationResult],
+  // ---- 子仓库支持 P0（56 → 57）：repoTree（仓库树发现）----
+  ["repoTree", repoTreeResult],
+  // ---- 子仓库支持 P1（57 → 58）：revExists（sha 存在性门控）----
+  ["revExists", revExistsResult],
+  // ---- 子仓库支持 P2（58 → 63）：submodule 管理五方法 ----
+  ["submoduleInit", mutationResult],
+  ["submoduleUpdate", mutationResult],
+  ["submoduleSync", mutationResult],
+  ["submoduleDeinit", mutationResult],
+  ["submoduleAdd", submoduleAddResult],
 ];
 
 function invocationOf(method, resultSchema) {
@@ -387,7 +523,7 @@ function invocationOf(method, resultSchema) {
   // 两代校验各看一个键、互不检查对方，所以两个键并存才能同时通过新旧两端；
   // 只写 schema 会在 0.1.7 的客户端 $mount 注册时抛 "strict codec has no create() factory"，
   // 导致插件槽位注册失败、入口按钮不出现（表现为"插件加载不上"）。
-  const requestSchema = z.object({}).passthrough();
+  const requestSchema = requestSchemaOf(method);
   return {
     id: "dsh-git-manager#gitManager/" + method,
     service: "gitManager",
