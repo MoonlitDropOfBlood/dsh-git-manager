@@ -302,6 +302,22 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // ---- Git 变更广播（composer 入口按钮徽标联动，v3） ----
+    // 面板内任何成功 mutation 都 notifyGitMutation()；ComposerGitButton 订阅该
+    // 信号立即重跑 probe——否则切换分支后入口处的分支徽标要等 60s 轮询才更新。
+    let gitMutTick = 0;
+    const gitMutListeners = new Set();
+    function notifyGitMutation() {
+      gitMutTick += 1;
+      gitMutListeners.forEach((f) => f());
+    }
+    function useGitMutationTick() {
+      return React.useSyncExternalStore(
+        (cb) => { gitMutListeners.add(cb); return () => gitMutListeners.delete(cb); },
+        () => gitMutTick,
+      );
+    }
+
     // ---- 弹层栈（契约 §0 P0 修复） ----
     // modalStack：顶层弹层（diff 窗口 / 确认框 / 表单弹窗 / 冲突编辑器）注册 { close, kind, z }。
     // document 级 Esc 只关栈顶；面板 Esc 仅在栈空时关面板；mask 点击只关自身。
@@ -416,6 +432,7 @@ window.__ModuleLoader__.load({
           })
         : null;
       const [probe, setProbe] = React.useState(null);
+      const mutTick = useGitMutationTick();
 
       React.useEffect(() => {
         let alive = true;
@@ -432,7 +449,7 @@ window.__ModuleLoader__.load({
         run();
         const t = setInterval(run, 60000);
         return () => { alive = false; clearInterval(t); };
-      }, [cwd, remote]);
+      }, [cwd, remote, mutTick]);
 
       if (!cwd || !probe || !probe.isRepo) return null;
 
@@ -1068,10 +1085,14 @@ window.__ModuleLoader__.load({
       const act = async (label, fn) => {
         setBusy(label); setError(null);
         try {
-          const r = await fn();
-          if (!r.ok) { setError(r.error.message || r.error.code); return; }
+          // 网关响应是外层包络 {ok, value:{ok, value}}：必须先 unwrap 再读方法字段。
+          // 此前漏了这层解包——r.value.status 恒 undefined（变更列表不刷新）、
+          // git 失败被当成功（错误条不出字）、merge/rebase 冲突不跳冲突页。
+          const r = unwrap(await fn());
+          if (!r.ok) { setError(r.error.message || r.error.code); return undefined; }
           // 变更方法都返回 { status } / { worktrees } / commit 等，按约定刷新
           if (r.value && r.value.status) setStatus(r.value.status);
+          notifyGitMutation();   // 让 composer 入口按钮立即重 probe（分支徽标跟随切换）
           return r.value;
         } catch (e) {
           setError(String(e && e.message || e));
@@ -2155,6 +2176,42 @@ window.__ModuleLoader__.load({
     // ============================================================================
     // BranchesTab（分支 + Tag 区）
     // ============================================================================
+
+    // 按 "/" 把分支名切成前缀树（纯函数，供分支树渲染用）
+    //   目录节点 { dir:true,  name:"段名", path:"a/b", children:[] }
+    //   叶子节点 { dir:false, name:"完整分支名", branch:原分支对象 }
+    // 排序：目录在前、叶子在后，同类按 name 做数字感知 + 大小写不敏感比较
+    // 注：git 不允许 "a" 与 "a/b" 同时存在，故无需处理「同一路径既是叶子又是目录」
+    function buildBranchTree(list) {
+      const root = [];
+      (list || []).forEach((b) => {
+        const segs = String(b.name).split("/").filter(Boolean);
+        if (!segs.length) return;
+        let cur = root, path = "";
+        segs.forEach((seg, i) => {
+          path = path ? path + "/" + seg : seg;
+          if (i === segs.length - 1) {
+            cur.push({ dir: false, name: b.name, branch: b });
+            return;
+          }
+          let dir = null;
+          for (const n of cur) if (n.dir && n.name === seg) { dir = n; break; }
+          if (!dir) {
+            dir = { dir: true, name: seg, path: path, children: [] };
+            cur.push(dir);
+          }
+          cur = dir.children;
+        });
+      });
+      const cmp = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+      const sortRec = (nodes) => {
+        nodes.sort((a, b) => (a.dir === b.dir ? cmp(a, b) : (a.dir ? -1 : 1)));
+        nodes.forEach((n) => { if (n.dir) sortRec(n.children); });
+      };
+      sortRec(root);
+      return root;
+    }
+
     function BranchesTab(props) {
       const remote = props.remote;
       const repoPath = props.repoPath;
@@ -2163,7 +2220,9 @@ window.__ModuleLoader__.load({
       const [branches, setBranches] = React.useState(null);
       const [remotes, setRemotes] = React.useState([]);
       const [tags, setTags] = React.useState([]);
-      const [creating, setCreating] = React.useState({ name: "", start: "" });
+      const [creating, setCreating] = React.useState({ name: "", start: "", checkout: true });
+      const [createDlg, setCreateDlg] = React.useState(null);
+      const [foldClosed, setFoldClosed] = React.useState(() => new Set());
       const [confirming, setConfirming] = React.useState(null);
       const [tagDlg, setTagDlg] = React.useState(false);
       const [tagForm, setTagForm] = React.useState({ name: "", target: "HEAD", message: "", force: false });
@@ -2186,15 +2245,25 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { refresh(); loadTags(); }, [repoPath]);
 
       // 切换作用域仓库 → 清空上一个仓库的分支/远端数据（避免短暂串仓库）
-      React.useEffect(() => { setBranches(null); setRemotes([]); setTags([]); }, [repoPath]);
+      // 顺带清空分支树折叠态：折叠路径是仓库内分支名，跨仓库无意义
+      React.useEffect(() => { setBranches(null); setRemotes([]); setTags([]); setFoldClosed(new Set()); }, [repoPath]);
+
+      // 分支树分组折叠（Set 不可变更新，仿 ChangesTab 的 toggleCollapse）
+      const toggleFold = (p) => setFoldClosed((cur) => {
+        const n = new Set(cur);
+        if (n.has(p)) n.delete(p); else n.add(p);
+        return n;
+      });
 
       const createNew = async (form) => {
         const f = form && form.name !== undefined ? form : creating;
         if (!f.name.trim()) return;
         const payload = { path: repoPath, name: f.name.trim() };
         if (f.start) payload.startPoint = f.start;
+        // Host branchCreate 支持 checkout：创建后立即切到新分支（默认开）
+        if (f.checkout !== false) payload.checkout = true;
         await act("createBranch", () => remote.branchCreate(payload));
-        setCreating({ name: "", start: "" });
+        setCreating({ name: "", start: "", checkout: true });
         refresh();
       };
 
@@ -2254,9 +2323,11 @@ window.__ModuleLoader__.load({
         await act("pushTag", () => remote.push({ path: repoPath, remote: "origin", refSpec: "refs/tags/" + name }));
       };
 
-      const renderRow = (b, isRemote) => React.createElement("div", {
+      // 叶子行（分支树 depth 层缩进）；按钮与信息沿用原有结构
+      const renderRow = (b, isRemote, depth) => React.createElement("div", {
         key: b.refname,
         className: "gm-file" + (b.current ? " gm-file-active" : ""),
+        style: { paddingLeft: 10 + (depth || 0) * 16 },
       },
         React.createElement("span", { className: "gm-file-kind " + (b.current ? "gm-file-kind-added" : "") }, b.current ? "★" : (isRemote ? "R" : "L")),
         React.createElement("span", { className: "gm-file-path" }, b.name),
@@ -2264,8 +2335,14 @@ window.__ModuleLoader__.load({
         b.upstream ? React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" } }, " ↑" + (b.ahead || 0) + " ↓" + (b.behind || 0) + (b.upstreamGone ? " gone" : "")) : null,
         React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, b.subject),
         isRemote
-          ? React.createElement("button", { className: "gm-mini", onClick: () => createNew({ name: b.name.replace(/^[^/]+\//, ""), start: b.name }) }, "基于它建本地")
+          ? React.createElement("button", { className: "gm-mini", onClick: () => setCreateDlg({ name: b.name.replace(/^[^/]+\//, ""), start: b.name, checkout: true }) }, "基于它建本地")
           : React.createElement(React.Fragment, null,
+              // 基于此分支新建（起点预填，可改）
+              React.createElement("button", {
+                className: "gm-mini",
+                title: "以 \"" + b.name + "\" 为起点新建一个分支（可改起点）",
+                onClick: () => setCreateDlg({ name: "", start: b.name, checkout: true }),
+              }, "基于此建分支"),
               b.current ? null : React.createElement("button", { className: "gm-mini", onClick: () => doCheckout(b.name) }, "切换"),
               b.current || b.name === "main" ? null : React.createElement("button", { className: "gm-mini", onClick: () => doMerge(b.name) }, "合并"),
               b.current ? null : React.createElement("button", {
@@ -2277,20 +2354,65 @@ window.__ModuleLoader__.load({
             ),
       );
 
+      // 目录分组下的叶子总数（递归求，用于目录行右侧灰色计数）
+      const branchLeafCount = (nodes) => nodes.reduce((acc, n) => acc + (n.dir ? branchLeafCount(n.children) : 1), 0);
+
+      // 分支树递归渲染：目录行（▸/▾ 可折叠 + 计数）+ 叶子行
+      const renderBranchNodes = (nodes, depth, isRemote) => nodes.map((n) => {
+        if (!n.dir) return renderRow(n.branch, isRemote, depth);
+        const closed = foldClosed.has(n.path);
+        return React.createElement(React.Fragment, { key: n.path },
+          React.createElement("div", {
+            className: "gm-file",
+            style: { cursor: "default", paddingLeft: 10 + depth * 16 },
+          },
+            React.createElement("button", {
+              className: "gm-mini",
+              title: closed ? "展开该分组" : "折叠该分组",
+              onClick: () => toggleFold(n.path),
+            }, closed ? "▸" : "▾"),
+            React.createElement("span", { className: "gm-file-path" }, n.name),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)" } }, "(" + branchLeafCount(n.children) + ")"),
+          ),
+          closed ? null : renderBranchNodes(n.children, depth + 1, isRemote),
+        );
+      });
+
       if (!branches) return React.createElement("div", { className: "gm-empty" }, "加载分支…");
+
+      const localTree = buildBranchTree(branches.locals);
+      const remoteTree = buildBranchTree(branches.remotes);
 
       return React.createElement(React.Fragment, null,
         React.createElement("div", { className: "gm-filegroup" },
           React.createElement("div", { className: "gm-filegroup-head" }, React.createElement("span", null, "本地 (" + branches.locals.length + ")"))),
-        branches.locals.map((b) => renderRow(b, false)),
+        branches.locals.length === 0
+          ? React.createElement("div", { className: "gm-meta", style: { padding: "6px 2px" } }, "（无）")
+          : renderBranchNodes(localTree, 0, false),
         branches.remotes.length > 0 ? React.createElement("div", { className: "gm-filegroup" },
           React.createElement("div", { className: "gm-filegroup-head" }, React.createElement("span", null, "远程 (" + branches.remotes.length + ")"))) : null,
-        branches.remotes.map((b) => renderRow(b, true)),
+        renderBranchNodes(remoteTree, 0, true),
         React.createElement("div", { className: "gm-commit", style: { marginTop: 14 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 500 } }, "新建分支"),
           React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
             React.createElement("input", { className: "gm-input", placeholder: "分支名", value: creating.name, onChange: (e) => setCreating((s) => ({ ...s, name: e.target.value })) }),
-            React.createElement("input", { className: "gm-input", placeholder: "起点（可选，commit-ish 或 origin/x）", value: creating.start, onChange: (e) => setCreating((s) => ({ ...s, start: e.target.value })) }),
+            // 起点改为下拉：默认 HEAD 或挑一个已有本地 / 远程分支
+            React.createElement("select", {
+              className: "gm-input",
+              style: { maxWidth: 220 },
+              value: creating.start,
+              onChange: (e) => setCreating((s) => ({ ...s, start: e.target.value })),
+            },
+              React.createElement("option", { value: "" }, "起点：默认 HEAD"),
+              React.createElement("optgroup", { label: "本地分支" }, branches.locals.map((b) =>
+                React.createElement("option", { key: b.refname, value: b.name }, b.name + (b.current ? "（当前）" : "")))),
+              React.createElement("optgroup", { label: "远程分支" }, branches.remotes.map((b) =>
+                React.createElement("option", { key: b.refname, value: b.name }, b.name))),
+            ),
+            React.createElement("label", { className: "gm-checkbox", title: "创建成功后立即切换到新分支（git switch 到新分支）" },
+              React.createElement("input", { type: "checkbox", checked: creating.checkout, onChange: (e) => setCreating((s) => ({ ...s, checkout: e.target.checked })) }),
+              "创建后切换到新分支",
+            ),
             React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: () => createNew() }, "新建"),
           ),
         ),
@@ -2341,6 +2463,30 @@ window.__ModuleLoader__.load({
           onCancel: () => setConfirming(null),
           onConfirm: () => doTagDelete(confirming && confirming.name),
         }),
+        // 基于既有分支新建分支的弹窗（本地行 / 远程行都走这里）
+        createDlg ? React.createElement(FormDialog, {
+          open: true,
+          title: "基于 \"" + createDlg.start + "\" 新建分支",
+          submitLabel: "新建分支",
+          onClose: () => setCreateDlg(null),
+          // 先关弹窗再提交：失败时错误由面板错误条展示
+          onSubmit: () => { const f = createDlg; setCreateDlg(null); return createNew(f); },
+          submitDisabled: !createDlg.name.trim(),
+          children: React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "gm-form-row" },
+              React.createElement("span", { className: "gm-form-label" }, "新分支名"),
+              React.createElement("input", { className: "gm-input", placeholder: "如 feature/login", value: createDlg.name, onChange: (e) => setCreateDlg((s) => ({ ...s, name: e.target.value })) }),
+            ),
+            React.createElement("div", { className: "gm-form-row" },
+              React.createElement("span", { className: "gm-form-label" }, "起点（commit-ish：分支名 / tag / sha，默认 HEAD）"),
+              React.createElement("input", { className: "gm-input", title: "可填 commit-ish：分支名、tag 或 sha；留空则用当前 HEAD", value: createDlg.start, onChange: (e) => setCreateDlg((s) => ({ ...s, start: e.target.value })) }),
+            ),
+            React.createElement("label", { className: "gm-checkbox", title: "创建成功后立即切换到新分支" },
+              React.createElement("input", { type: "checkbox", checked: createDlg.checkout, onChange: (e) => setCreateDlg((s) => ({ ...s, checkout: e.target.checked })) }),
+              "创建后切换到新分支",
+            ),
+          ),
+        }) : null,
         // 新建 tag 弹窗
         tagDlg ? React.createElement(FormDialog, {
           open: true,

@@ -23,7 +23,7 @@
 | 域 | 能力 |
 |---|---|
 | 📝 变更 | 置顶**提交框**（多行 message + amend）、staged / unstaged / untracked 三组文件、文件级暂存/取消暂存/全部暂存，diff 窗口内 **hunk 级 + 行级操作**（暂存/撤销/取消暂存此块、**点选任意行暂存/撤销**，IDEA 式逐块），文件「丢弃」（CJK 文件名完整支持）、**文件历史**，**stash 全家**：暂存更改到 stash（可含未跟踪）、列表、应用 / 弹出 / 删除 / 清空 |
-| 🌿 分支 | 本地 / 远程列表（upstream、ahead/behind 角标），新建（带起点）/ 切换 / 改名 / 删除（未合并需二次确认）/ 合并，与当前分支对比 diff；**Tag 区**：列表、新建（含 annotated + force）、push 到远程、删除 |
+| 🌿 分支 | 本地 / 远程列表（upstream、ahead/behind 角标），**按 `/` 分组的可折叠文件树**；新建分支支持起点下拉 / 行内「基于此建分支」预填起点 + 创建后切换；切换 / 改名 / 删除（未合并需二次确认）/ 合并，与当前分支对比 diff；**Tag 区**：列表、新建（含 annotated + force）、push 到远程、删除 |
 | 🕸 历史 | **分支线图形**（`git log --all --date-order` + Host 侧布局计算 + Client 纯 SVG 渲染，长跨度边自动省略淡化、悬停高亮单条分支走向）+ refs 徽章 + 「加载更多」渐进取全窗；**过滤条**（ref/tag、文件路径、作者、grep、起止日期）；**提交详情侧栏**（完整信息 + 变更文件统计，点文件开只读 diff / blame / 该文件历史）；**范围对比**（依次选 base / head 两提交看 diff）；**交互式 rebase**（「从这里整理历史…」：todo 排序 + pick/squash/fixup/drop/edit + squash 信息编辑）；提交操作：**Revert**、**Reset 当前分支**（soft / mixed / hard）、**fixup 修正任意提交**、cherry-pick 到当前分支、**undo**（撤销上次提交 / 撤销上次分支移动，带重做提示） |
 | 🔀 冲突 | 合并进行中横幅（继续 / 中止）+ 每文件三种解决方式：ours / theirs / 手动编辑（base / ours / theirs 三栏对照 + 可编辑区）；revert / cherry-pick 冲突复用同一流程 |
 | 🌳 Worktree | 列表 / **添加弹窗**（路径 + 新分支名 + 起点；**成功后自动注册为 DSH 工作区**，workspace-write 沙盒下直接可写）/ 删除（脏目录需 force 二次确认）/ prune |
