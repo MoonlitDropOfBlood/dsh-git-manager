@@ -3522,6 +3522,32 @@ test("static: engines.dsh 宿主版本声明（dshmarket 显示/筛选/阻断数
       "0.2.0-rc.1 落在 range 内（boot 兼容硬门需要，否则拒装）",
       alts.some((a) => caretContains(a, "0.2.0-rc.1")),
     );
+    // dshmarket 的 peer 诊断（src/check.ts satisfiesRange，不带 includePrerelease）
+    // 按 npm 默认预发布准入求值：带预发布标签的版本只会被「同 [major,minor,patch]
+    // tuple 且自身带预发布」的 || 候选接纳。profile 里 pnpm 会把 peer 解析到插件
+    // 嵌套 node_modules 的 0.1.1-rc.2（被同 profile 其它插件的精确钉版促成），
+    // range 缺同 tuple 候选时市场即警告
+    // "peer range ... does not match resolved 0.1.1-rc.2"（2026-10-19 实测，修复=补 ^0.1.1-rc.0）。
+    const npmAdmits = (candidate, version) => {
+      const lo = candidate.match(/^\^(\d+)\.(\d+)\.(\d+)-rc\.(\d+)$/);
+      const hi = version.match(/^(\d+)\.(\d+)\.(\d+)-rc\.(\d+)$/);
+      if (!lo || !hi) return false;
+      if (lo[1] !== hi[1] || lo[2] !== hi[2] || lo[3] !== hi[3]) return false;
+      // >= 下界（同 tuple 下按 rc 序）；^ 上界在同 minor 内必然满足
+      return Number(hi[4]) >= Number(lo[4]);
+    };
+    check(
+      "0.2.0-rc.1 被 npm 默认准入语义接纳（同 tuple 候选存在）",
+      alts.some((a) => npmAdmits(a, "0.2.0-rc.1")),
+    );
+    check(
+      "0.1.1-rc.2 被 npm 默认准入语义接纳（dshmarket peer 诊断；2026-10-19 实测 profile 嵌套解析到 0.1.1-rc.2）",
+      alts.some((a) => npmAdmits(a, "0.1.1-rc.2")),
+    );
+    check(
+      "0.2.1-rc.2 被 npm 默认准入语义接纳（当前 runtime）",
+      alts.some((a) => npmAdmits(a, "0.2.1-rc.2")),
+    );
   }
 });
 

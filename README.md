@@ -120,7 +120,7 @@ dsh plugin --profile web add /path/to/dsh-git-manager
 
 ### 兼容性
 
-宿主要求 **DSH `^0.1.0-rc.7 || ^0.2.0-rc.1`**（`package.json` 顶层 `engines.dsh` + `dsh.engines.dsh` 双位置声明，dshmarket 卡片的「宿主要求」/「适配本机 DSH 版本」筛选即读此值）。Typert strict codec 采用 `schema` + `create()` 双形态，已用 DSH 全部 21 个 typert-loader 版本（0.1.0-rc.6 … 0.1.7-rc.2）逐一校验 manifest 通过——0.1.6-alpha.2 起 DSH 改用 `codec.create().` 工厂，只写 `schema` 会在 0.1.7 上导致 `$mount` 抛 `has no create() factory`、入口按钮不出现。
+宿主要求 **DSH `^0.1.0-rc.7 || ^0.1.1-rc.0 || ^0.2.0-rc.1 || ^0.2.1-rc.0`**（`package.json` 顶层 `engines.dsh` + `dsh.engines.dsh` 双位置声明，dshmarket 卡片的「宿主要求」/「适配本机 DSH 版本」筛选即读此值；peer `@deepseek-ai/dsh-typert-protocol` 同 range——dshmarket 的 peer 诊断按 npm 默认预发布准入求值，profile 把该 peer 解析到 0.1.1-rc.2 时需要同 tuple 候选 `^0.1.1-rc.0` 才不告警）。Typert strict codec 采用 `schema` + `create()` 双形态，已用 DSH 全部 21 个 typert-loader 版本（0.1.0-rc.6 … 0.1.7-rc.2）逐一校验 manifest 通过——0.1.6-alpha.2 起 DSH 改用 `codec.create().` 工厂，只写 `schema` 会在 0.1.7 上导致 `$mount` 抛 `has no create() factory`、入口按钮不出现。
 
 ## 使用
 
