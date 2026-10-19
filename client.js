@@ -56,6 +56,16 @@ window.__ModuleLoader__.load({
 .gm-notice{padding:8px 14px;border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent);color:var(--dsw-alias-state-success-primary);font-size:12px;margin-bottom:10px}
 .gm-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--dsw-alias-border-l1);border-top-color:var(--dsw-alias-brand-primary);animation:gm-spin .8s linear infinite;flex:none;display:inline-block;vertical-align:middle}
 @keyframes gm-spin{to{transform:rotate(360deg)}}
+.gm-spinner-sm{width:12px;height:12px}
+/* 主按钮（蓝底）内的 spinner 用白色系，保证对比度 */
+.gm-btn-primary .gm-spinner{border-color:color-mix(in srgb,#fff 35%,transparent);border-top-color:#fff}
+/* 头部进行中状态条（spinner + 文案） */
+.gm-busy{display:inline-flex;align-items:center;gap:6px;flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);max-width:240px;white-space:nowrap;overflow:hidden}
+.gm-busy-text{overflow:hidden;text-overflow:ellipsis}
+/* 面板顶部不定进度条：任何操作进行中（busy）时出现，覆盖在面板顶缘不占布局 */
+.gm-progress{position:absolute;top:0;left:0;right:0;height:2px;z-index:6;overflow:hidden;pointer-events:none}
+.gm-progress::after{content:"";position:absolute;top:0;bottom:0;left:-35%;width:35%;border-radius:2px;background:var(--dsw-alias-brand-primary);animation:gm-progress 1.1s ease-in-out infinite}
+@keyframes gm-progress{0%{left:-35%}100%{left:100%}}
 .gm-empty{padding:36px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
 
 /* Composer 工具行入口按钮（模式/access-mode 选择器旁，conversation.input.left） */
@@ -72,7 +82,7 @@ window.__ModuleLoader__.load({
 /* Repo select + header controls */
 .gm-head-path{font-size:12px;color:var(--dsw-alias-label-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gm-input{box-sizing:border-box;height:30px;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:0 10px;outline:none}
-.gm-btn{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.gm-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
 .gm-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .gm-btn-icon{width:30px;padding:0}
 .gm-btn-primary{background:var(--dsw-alias-button-info-fill);color:#fff;border-color:transparent;background-clip:padding-box}
@@ -89,9 +99,15 @@ window.__ModuleLoader__.load({
 /* File list (Changes tab) */
 .gm-filegroup{padding:8px 0}
 .gm-filegroup-head{display:flex;align-items:center;gap:8px;font-weight:500;font-size:12px;color:var(--dsw-alias-label-secondary);padding:4px 2px;border-bottom:1px solid var(--dsw-alias-border-l1);margin-bottom:6px}
-.gm-file{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary)}
+.gm-file{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary);position:relative}
 .gm-file:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .gm-file-active{background:var(--dsw-alias-interactive-bg-active)}
+/* 分支行展开态 + 操作行（另起一行）：行与操作行同底色、上下圆角互补，视觉上连成一张卡 */
+.gm-file.gm-branch-open{background:var(--dsw-alias-interactive-bg-hover);border-radius:8px 8px 0 0}
+.gm-branch-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:2px 10px 8px;background:var(--dsw-alias-interactive-bg-hover);border-radius:0 0 8px 8px}
+/* 行尾展开指示（▸/▾）：无边的微型按钮，键盘可聚焦 */
+.gm-branch-caret{appearance:none;background:transparent;border:none;cursor:pointer;color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:1;padding:4px;flex:none;border-radius:4px}
+.gm-branch-caret:hover{color:var(--dsw-alias-label-primary)}
 .gm-file-kind{font-size:10px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);text-transform:uppercase;line-height:16px;flex:none}
 .gm-file-kind-modified{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 15%,transparent);color:var(--dsw-alias-brand-primary)}
 .gm-file-kind-added{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 15%,transparent);color:var(--dsw-alias-state-success-primary)}
@@ -1140,6 +1156,51 @@ window.__ModuleLoader__.load({
         } catch (_) { /* 忽略：15s 轮询会自愈 */ }
       };
 
+      // busy 标签 → 头部状态条文案（未映射的 label 原样展示）
+      const BUSY_LABEL = {
+        "Fetch": "Fetch", "Pull": "Pull", "Push": "Push", "Fetch 全部": "Fetch 全部", "Pull 全部": "Pull 全部",
+        commit: "提交", stage: "暂存", unstage: "取消暂存", "stage-all": "暂存全部", "unstage-all": "取消暂存全部",
+        discard: "丢弃改动", "discard-all": "丢弃全部改动", checkout: "切换分支", merge: "合并", createBranch: "新建分支",
+        deleteBranch: "删除分支", rebaseBranch: "Rebase", tagCreate: "新建 tag", tagDelete: "删除 tag", pushTag: "推送 tag",
+        stashPush: "创建 stash", stashApply: "应用 stash", stashPop: "弹出 stash", stashDrop: "删除 stash",
+        init: "初始化仓库", reset: "Reset", revert: "Revert", cherryPick: "Cherry-pick", undoCommit: "撤销提交",
+        worktreeAdd: "新建 worktree", worktreeRemove: "删除 worktree", worktreePrune: "清理 worktree",
+        submoduleUpdate: "更新子仓库", submoduleAdd: "添加子仓库", mergeContinue: "完成合并", mergeAbort: "中止合并",
+        stageHunk: "暂存代码块", hunkApply: "应用代码块操作", lineApply: "应用行操作",
+        remoteAdd: "添加 remote", remoteRename: "重命名 remote", remoteRemove: "删除 remote",
+        configSet: "保存配置", configUnset: "删除配置",
+        resolveOurs: "采用本方版本", resolveTheirs: "采用对方版本", resolveCustom: "保存手动编辑",
+      };
+      const busyText = (b) => (BUSY_LABEL[b] || b) + "…";
+
+      // 头部网络操作（Fetch/Pull/Push）的完成反馈：成功后 toast 展示 git 输出尾
+      //（fetch/pull/push 的 value 都带 output 字段，git-core 的 NET_OUTPUT_TAIL 截尾）；
+      // 失败走 act 的错误条，无需 toast。
+      const netDone = (verb, r) => {
+        if (!r) return;
+        const out = String(r.output || "").trim();
+        showToast(verb + " 完成" + (out ? "：\n" + out.slice(-400) : "。"));
+      };
+      // 头部网络按钮：统一走 act（busy 互斥 + 错误处理 + status 刷新），
+      // 进行中时按钮内嵌 spinner 并追加 "…"（此前 Fetch 不走 act，点了毫无反馈）。
+      const headNetBtn = (label, primary) => React.createElement("button", {
+        className: "gm-btn" + (primary ? " gm-btn-primary" : ""),
+        disabled: !!busy,
+        title: label === "Fetch" ? "从远端拉取最新引用（git fetch --prune）"
+          : label === "Pull" ? "拉取并合并到当前分支（git pull）" : "推送当前分支到远端（git push）",
+        onClick: async () => {
+          const fn = label === "Fetch" ? () => remote.fetch({ path: scopedRepoPath })
+            : label === "Pull" ? () => remote.pull({ path: scopedRepoPath })
+            : () => remote.push({ path: scopedRepoPath });
+          const r = await act(label, fn);
+          if (r) netDone(label, r);
+          refreshTree();
+        },
+      },
+        busy === label ? React.createElement("span", { className: "gm-spinner gm-spinner-sm", key: "sp" }) : null,
+        busy === label ? label + "…" : label,
+      );
+
       const head = React.createElement("div", { className: "gm-head" },
         React.createElement("span", { className: "gm-head-title" }, "Git 管理"),
         React.createElement("span", {
@@ -1147,15 +1208,20 @@ window.__ModuleLoader__.load({
           title: scopedRepoPath === repoPath ? repoPath : (repoPath + "\n→ 当前仓库：" + scopedRepoPath),
         }, scopedRepoPath),
         React.createElement("span", { className: "gm-head-spacer" }),
+        // 进行中状态条：任何 act/bulk 操作都在头部有可见反馈（spinner + 文案）
+        busy ? React.createElement("span", { className: "gm-busy", role: "status", title: "正在执行操作：" + busyText(busy) },
+          React.createElement("span", { className: "gm-spinner gm-spinner-sm" }),
+          React.createElement("span", { className: "gm-busy-text" }, busyText(busy)),
+        ) : null,
         React.createElement("div", { className: "gm-head-actions" },
           status && probe && !probe.detached && (status.ahead > 0 || status.behind > 0) ? React.createElement("span", { className: "gm-badge", style: { fontSize: 12 }, title: "与远端的差距：↑ 本地领先提交数，↓ 本地落后提交数" },
             status.ahead > 0 ? React.createElement("span", { className: "gm-badge-ahead" }, "↑" + status.ahead) : null,
             status.ahead > 0 && status.behind > 0 ? " " : null,
             status.behind > 0 ? React.createElement("span", { className: "gm-badge-behind" }, "↓" + status.behind) : null,
           ) : null,
-          React.createElement("button", { className: "gm-btn", onClick: async () => { const r = await unwrap(await remote.fetch({ path: scopedRepoPath })); if (!r.ok) setError(r.error.message); else { setStatus(r.value.status); setRemotes(r.value.remotes || remotes); refreshTree(); } }, disabled: !!busy }, "Fetch"),
-          React.createElement("button", { className: "gm-btn", onClick: async () => { await act("Pull", () => remote.pull({ path: scopedRepoPath })); refreshTree(); }, disabled: !!busy }, "Pull"),
-          React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: async () => { await act("Push", () => remote.push({ path: scopedRepoPath })); refreshTree(); }, disabled: !!busy }, "Push"),
+          headNetBtn("Fetch"),
+          headNetBtn("Pull"),
+          headNetBtn("Push", true),
           // P2：多仓库时的批量 fetch / pull（单仓库时无意义，不渲染）
           Array.isArray(repos) && repos.length > 1
             ? React.createElement("button", {
@@ -1163,7 +1229,7 @@ window.__ModuleLoader__.load({
                 disabled: !!busy,
                 title: "对所有已初始化的仓库（含主仓库）串行执行 git fetch；单个仓库失败不中断其余",
                 onClick: () => bulkRemote("fetch"),
-              }, busy === "Fetch 全部" ? "Fetch 全部…" : "Fetch 全部")
+              }, busy === "Fetch 全部" ? React.createElement("span", { className: "gm-spinner gm-spinner-sm", key: "sp" }) : null, busy === "Fetch 全部" ? "Fetch 全部…" : "Fetch 全部")
             : null,
           Array.isArray(repos) && repos.length > 1
             ? React.createElement("button", {
@@ -1171,7 +1237,7 @@ window.__ModuleLoader__.load({
                 disabled: !!busy,
                 title: "对所有已初始化的仓库串行执行 git pull（detached / 尚无提交的仓库自动跳过）；单个仓库失败不中断其余",
                 onClick: () => bulkRemote("pull"),
-              }, busy === "Pull 全部" ? "Pull 全部…" : "Pull 全部")
+              }, busy === "Pull 全部" ? React.createElement("span", { className: "gm-spinner gm-spinner-sm", key: "sp" }) : null, busy === "Pull 全部" ? "Pull 全部…" : "Pull 全部")
             : null,
           React.createElement("button", { className: "gm-btn gm-btn-icon", onClick: () => setOpen(false), title: "关闭（Esc）", "aria-label": "关闭 Git 管理面板" },
             React.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", "aria-hidden": true },
@@ -1291,6 +1357,8 @@ window.__ModuleLoader__.load({
       const errBar = error ? React.createElement("div", { className: "gm-error" }, error) : null;
 
       return React.createElement("div", { className: "gm-panel", onClick: (e) => e.stopPropagation() },
+        // 顶部不定进度条：任何操作进行中（busy）时滑动动画，覆盖在面板顶缘、不占布局
+        busy ? React.createElement("div", { className: "gm-progress", key: "gm-progress", "aria-hidden": "true" }) : null,
         head,
         banner,
         React.createElement("div", { className: "gm-main" },
@@ -2223,6 +2291,7 @@ window.__ModuleLoader__.load({
       const [creating, setCreating] = React.useState({ name: "", start: "", checkout: true });
       const [createDlg, setCreateDlg] = React.useState(null);
       const [foldClosed, setFoldClosed] = React.useState(() => new Set());
+      const [openRow, setOpenRow] = React.useState(null); // 展开操作行的分支（"l:refs/..." | "r:refs/..."；同一时间只展开一行）
       const [confirming, setConfirming] = React.useState(null);
       const [tagDlg, setTagDlg] = React.useState(false);
       const [tagForm, setTagForm] = React.useState({ name: "", target: "HEAD", message: "", force: false });
@@ -2246,7 +2315,7 @@ window.__ModuleLoader__.load({
 
       // 切换作用域仓库 → 清空上一个仓库的分支/远端数据（避免短暂串仓库）
       // 顺带清空分支树折叠态：折叠路径是仓库内分支名，跨仓库无意义
-      React.useEffect(() => { setBranches(null); setRemotes([]); setTags([]); setFoldClosed(new Set()); }, [repoPath]);
+      React.useEffect(() => { setBranches(null); setRemotes([]); setTags([]); setFoldClosed(new Set()); setOpenRow(null); }, [repoPath]);
 
       // 分支树分组折叠（Set 不可变更新，仿 ChangesTab 的 toggleCollapse）
       const toggleFold = (p) => setFoldClosed((cur) => {
@@ -2323,36 +2392,59 @@ window.__ModuleLoader__.load({
         await act("pushTag", () => remote.push({ path: repoPath, remote: "origin", refSpec: "refs/tags/" + name }));
       };
 
-      // 叶子行（分支树 depth 层缩进）；按钮与信息沿用原有结构
-      const renderRow = (b, isRemote, depth) => React.createElement("div", {
-        key: b.refname,
-        className: "gm-file" + (b.current ? " gm-file-active" : ""),
-        style: { paddingLeft: 10 + (depth || 0) * 16 },
-      },
-        React.createElement("span", { className: "gm-file-kind " + (b.current ? "gm-file-kind-added" : "") }, b.current ? "★" : (isRemote ? "R" : "L")),
-        React.createElement("span", { className: "gm-file-path" }, b.name),
-        React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", fontFamily: "ui-monospace,monospace" } }, b.shortSha),
-        b.upstream ? React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" } }, " ↑" + (b.ahead || 0) + " ↓" + (b.behind || 0) + (b.upstreamGone ? " gone" : "")) : null,
-        React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, b.subject),
-        isRemote
-          ? React.createElement("button", { className: "gm-mini", onClick: () => setCreateDlg({ name: b.name.replace(/^[^/]+\//, ""), start: b.name, checkout: true }) }, "基于它建本地")
-          : React.createElement(React.Fragment, null,
-              // 基于此分支新建（起点预填，可改）
-              React.createElement("button", {
-                className: "gm-mini",
-                title: "以 \"" + b.name + "\" 为起点新建一个分支（可改起点）",
-                onClick: () => setCreateDlg({ name: "", start: b.name, checkout: true }),
-              }, "基于此建分支"),
-              b.current ? null : React.createElement("button", { className: "gm-mini", onClick: () => doCheckout(b.name) }, "切换"),
-              b.current || b.name === "main" ? null : React.createElement("button", { className: "gm-mini", onClick: () => doMerge(b.name) }, "合并"),
-              b.current ? null : React.createElement("button", {
-                className: "gm-mini",
-                title: "把当前分支 rebase 到该分支之上（改写当前分支历史）",
-                onClick: () => setConfirming({ kind: "rebase", name: b.name }),
-              }, "Rebase 当前到此分支"),
-              b.current ? null : React.createElement("button", { className: "gm-mini gm-mini-danger", onClick: () => setConfirming({ kind: "delete", name: b.name }) }, "删除"),
-            ),
-      );
+      // 叶子行（分支树 depth 层缩进）+ 展开后的操作行（用户反馈 #2 第二版：
+      // 所有操作按钮**另起一行**）。点击行或行尾 ▸/▾ 展开/收起，同一时间只展开一行；
+      // 相比悬停展开不会因鼠标划过导致列表高度跳动，相比右侧浮层不遮挡提交说明。
+      // 行本身保持只有 名字/短sha/ahead-behind/说明，分支多/层级深时名字完整可读。
+      const renderRow = (b, isRemote, depth) => {
+        const openKey = (isRemote ? "r:" : "l:") + b.refname;
+        const isOpen = openRow === openKey;
+        const indent = 10 + (depth || 0) * 16;
+        return React.createElement(React.Fragment, { key: b.refname },
+          React.createElement("div", {
+            className: "gm-file" + (b.current ? " gm-file-active" : "") + (isOpen ? " gm-branch-open" : ""),
+            style: { paddingLeft: indent },
+            onClick: () => setOpenRow(isOpen ? null : openKey),
+          },
+            React.createElement("span", { className: "gm-file-kind " + (b.current ? "gm-file-kind-added" : "") }, b.current ? "★" : (isRemote ? "R" : "L")),
+            React.createElement("span", { className: "gm-file-path", title: b.name }, b.name),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", fontFamily: "ui-monospace,monospace" } }, b.shortSha),
+            b.upstream ? React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" } }, " ↑" + (b.ahead || 0) + " ↓" + (b.behind || 0) + (b.upstreamGone ? " gone" : "")) : null,
+            React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", marginLeft: 8, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: b.subject }, b.subject),
+            // 行尾展开指示（键盘可达：stopPropagation 防止与行 onClick 叠成双次切换）
+            React.createElement("button", {
+              className: "gm-branch-caret",
+              title: isOpen ? "收起该分支的操作" : "展开该分支的操作",
+              "aria-expanded": isOpen ? "true" : "false",
+              onClick: (e) => { e.stopPropagation(); setOpenRow(isOpen ? null : openKey); },
+            }, isOpen ? "▾" : "▸"),
+          ),
+          isOpen ? React.createElement("div", { className: "gm-branch-actions", style: { paddingLeft: indent + 30 } },
+            isRemote
+              ? React.createElement("button", {
+                  className: "gm-mini",
+                  title: "检出该远程分支为新的本地分支（可改分支名与起点）",
+                  onClick: () => setCreateDlg({ name: b.name.replace(/^[^/]+\//, ""), start: b.name, checkout: true }),
+                }, "检出为本地分支…")
+              : React.createElement(React.Fragment, null,
+                  // 基于此分支新建（起点预填，可改）
+                  React.createElement("button", {
+                    className: "gm-mini",
+                    title: "以 \"" + b.name + "\" 为起点新建一个分支（可改起点）",
+                    onClick: () => setCreateDlg({ name: "", start: b.name, checkout: true }),
+                  }, "以此为起点新建分支…"),
+                  b.current ? null : React.createElement("button", { className: "gm-mini", title: "切换到该分支（git checkout）", onClick: () => doCheckout(b.name) }, "切换到此分支"),
+                  b.current || b.name === "main" ? null : React.createElement("button", { className: "gm-mini", title: "把该分支合并进当前分支（git merge）", onClick: () => doMerge(b.name) }, "合并到当前分支"),
+                  b.current ? null : React.createElement("button", {
+                    className: "gm-mini",
+                    title: "把当前分支 rebase 到该分支之上（改写当前分支历史，需确认）",
+                    onClick: () => setConfirming({ kind: "rebase", name: b.name }),
+                  }, "Rebase 当前分支到此…"),
+                  b.current ? null : React.createElement("button", { className: "gm-mini gm-mini-danger", title: "删除该分支（需确认；未合并将失败）", onClick: () => setConfirming({ kind: "delete", name: b.name }) }, "删除分支"),
+                ),
+          ) : null,
+        );
+      };
 
       // 目录分组下的叶子总数（递归求，用于目录行右侧灰色计数）
       const branchLeafCount = (nodes) => nodes.reduce((acc, n) => acc + (n.dir ? branchLeafCount(n.children) : 1), 0);
@@ -2384,17 +2476,11 @@ window.__ModuleLoader__.load({
       const remoteTree = buildBranchTree(branches.remotes);
 
       return React.createElement(React.Fragment, null,
-        React.createElement("div", { className: "gm-filegroup" },
-          React.createElement("div", { className: "gm-filegroup-head" }, React.createElement("span", null, "本地 (" + branches.locals.length + ")"))),
-        branches.locals.length === 0
-          ? React.createElement("div", { className: "gm-meta", style: { padding: "6px 2px" } }, "（无）")
-          : renderBranchNodes(localTree, 0, false),
-        branches.remotes.length > 0 ? React.createElement("div", { className: "gm-filegroup" },
-          React.createElement("div", { className: "gm-filegroup-head" }, React.createElement("span", null, "远程 (" + branches.remotes.length + ")"))) : null,
-        renderBranchNodes(remoteTree, 0, true),
-        React.createElement("div", { className: "gm-commit", style: { marginTop: 14 } },
+        // 新建分支置顶（用户反馈 #3）：分支多时不用滚到底部找入口。
+        // gm-commit 默认 margin-top:14，置顶后归零让它贴住内容区顶部。
+        React.createElement("div", { className: "gm-commit", style: { marginTop: 0 } },
           React.createElement("div", { style: { fontSize: 12, fontWeight: 500 } }, "新建分支"),
-          React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+          React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
             React.createElement("input", { className: "gm-input", placeholder: "分支名", value: creating.name, onChange: (e) => setCreating((s) => ({ ...s, name: e.target.value })) }),
             // 起点改为下拉：默认 HEAD 或挑一个已有本地 / 远程分支
             React.createElement("select", {
@@ -2416,6 +2502,14 @@ window.__ModuleLoader__.load({
             React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: () => createNew() }, "新建"),
           ),
         ),
+        React.createElement("div", { className: "gm-filegroup" },
+          React.createElement("div", { className: "gm-filegroup-head" }, React.createElement("span", null, "本地 (" + branches.locals.length + ")"))),
+        branches.locals.length === 0
+          ? React.createElement("div", { className: "gm-meta", style: { padding: "6px 2px" } }, "（无）")
+          : renderBranchNodes(localTree, 0, false),
+        branches.remotes.length > 0 ? React.createElement("div", { className: "gm-filegroup" },
+          React.createElement("div", { className: "gm-filegroup-head" }, React.createElement("span", null, "远程 (" + branches.remotes.length + ")"))) : null,
+        renderBranchNodes(remoteTree, 0, true),
         // Tag 区
         React.createElement("div", { className: "gm-section" },
           React.createElement("div", { className: "gm-section-head" },
@@ -2425,16 +2519,34 @@ window.__ModuleLoader__.load({
           ),
           tags.length === 0
             ? React.createElement("div", { className: "gm-meta", style: { padding: "6px 2px" } }, "暂无 tag。")
-            : tags.map((t) => React.createElement("div", { key: t.name, className: "gm-file", style: { cursor: "default" } },
-                React.createElement("span", { className: "gm-file-kind" }, "T"),
-                React.createElement("span", { className: "gm-file-path" }, t.name),
-                t.annotated ? React.createElement("span", { className: "gm-tag-badge", title: t.message || "annotated tag" }, "annotated") : null,
-                React.createElement("span", { className: "gm-meta", style: { fontFamily: "ui-monospace,monospace" } }, t.short),
-                React.createElement("span", { className: "gm-meta", title: t.subject }, (t.subject || "").slice(0, 40)),
-                React.createElement("span", { className: "gm-meta" }, fmtTime(t.at)),
-                React.createElement("button", { className: "gm-mini", title: "推送该 tag 到 origin", onClick: () => doTagPush(t.name) }, "push 到 origin"),
-                React.createElement("button", { className: "gm-mini gm-mini-danger", onClick: () => setConfirming({ kind: "tagDelete", name: t.name }) }, "删除"),
-              )),
+            : tags.map((t) => {
+                const tagKey = "t:" + t.name;
+                const tagOpen = openRow === tagKey;
+                return React.createElement(React.Fragment, { key: t.name },
+                  React.createElement("div", {
+                    className: "gm-file" + (tagOpen ? " gm-branch-open" : ""),
+                    style: { cursor: "pointer" },
+                    onClick: () => setOpenRow(tagOpen ? null : tagKey),
+                  },
+                    React.createElement("span", { className: "gm-file-kind" }, "T"),
+                    React.createElement("span", { className: "gm-file-path" }, t.name),
+                    t.annotated ? React.createElement("span", { className: "gm-tag-badge", title: t.message || "annotated tag" }, "annotated") : null,
+                    React.createElement("span", { className: "gm-meta", style: { fontFamily: "ui-monospace,monospace" } }, t.short),
+                    React.createElement("span", { className: "gm-meta", title: t.subject }, (t.subject || "").slice(0, 40)),
+                    React.createElement("span", { className: "gm-meta" }, fmtTime(t.at)),
+                    React.createElement("button", {
+                      className: "gm-branch-caret",
+                      title: tagOpen ? "收起该 tag 的操作" : "展开该 tag 的操作",
+                      "aria-expanded": tagOpen ? "true" : "false",
+                      onClick: (e) => { e.stopPropagation(); setOpenRow(tagOpen ? null : tagKey); },
+                    }, tagOpen ? "▾" : "▸"),
+                  ),
+                  tagOpen ? React.createElement("div", { className: "gm-branch-actions", style: { paddingLeft: 40 } },
+                    React.createElement("button", { className: "gm-mini", title: "推送该 tag 到 origin", onClick: () => doTagPush(t.name) }, "推送到 origin"),
+                    React.createElement("button", { className: "gm-mini gm-mini-danger", title: "删除该本地 tag（需确认；已推送的远端 tag 不受影响）", onClick: () => setConfirming({ kind: "tagDelete", name: t.name }) }, "删除 tag"),
+                  ) : null,
+                );
+              }),
         ),
         React.createElement(ConfirmDialog, {
           open: !!confirming && confirming.kind === "delete",
