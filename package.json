@@ -1,6 +1,6 @@
 {
   "name": "@duke-dsh-plugins/dsh-git-manager",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "DSH 正式 bundle 插件：在 DSH Web UI 里管理 Git 工作区——入口在输入框「模式」选择器旁（仅 git 仓库显示），进入与设置同规格的居中面板：变更暂存（hunk 级/行级/stash）、分支与 tag、交互式 rebase、提交历史（分支线图形/过滤/范围对比/revert/reset/fixup/undo）、合并冲突解决、blame/reflog、worktree 管理（添加后自动注册为 DSH 工作区）、remote/config 设置，以及**子仓库支持**（git submodule + 嵌套独立仓库：仓库树发现、变更聚合分组、仓库切换、指针 diff 与冲突解决、submodule 管理与嵌套仓库注册）。",
   "repository": {
     "type": "git",
@@ -27,6 +27,7 @@
     "./client": "./client.js",
     "./typert": "./typert.host.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
@@ -35,7 +36,8 @@
     "typert.host.js",
     "git-core.mjs",
     "git-graph.mjs",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "icon.svg"
   ],
   "license": "MIT",
   "engines": {
