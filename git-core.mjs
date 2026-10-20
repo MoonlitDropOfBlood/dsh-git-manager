@@ -1023,8 +1023,21 @@ export function parseWorktreePorcelain(text) {
 }
 
 // ============================================================================
-// 查询：getWorktrees
+// 查询：getWorktrees（基础字段 + 行内状态富化）
+//   返回 { worktrees: [...] }，每条含 path/branch/detached 等基础字段、current
+//   标注，以及行内状态（脏计数 / ahead-behind / headShort），供客户端渲染。
+//   富化语义（JSON-safe：有值才挂 key，绝不挂 undefined/null）：
+//     - dirty = statusSummary(getStatus(path))：staged/unstaged/untracked/conflicted 四个数字
+//     - ahead / behind：仅当该 worktree 有 upstream 时才挂（新分支无 upstream 就不挂）
+//     - headShort：headSha 前 12 位（与 probeRepo 的 --short=12 同口径），非空才挂
+//     - error：状态查询失败（目录被删、git 报错等）时只挂 error，单节点失败不炸整体
+//   bare worktree 没有工作区，直接跳过富化。
+//   每个 worktree 都要跑一次 status（内部再 probeRepo），不限并发在 Windows 上
+//   是进程风暴，故限 4 并发（WORKTREE_CONCURRENCY）。
 // ============================================================================
+
+// 每个 worktree 富化要跑 status（+ probeRepo）；4 并发与子仓库发现同口径。
+const WORKTREE_CONCURRENCY = 4;
 
 export async function getWorktrees(cwd) {
   const raw = await runGit(cwd, ["worktree", "list", "--porcelain"]);
@@ -1035,6 +1048,23 @@ export async function getWorktrees(cwd) {
   for (const item of list) {
     item.current = (toplevel && item.path && (item.path === toplevel || item.path.toLowerCase() === toplevel.toLowerCase()));
   }
+  // 行内状态富化（非 bare）：dirty / ahead / behind / headShort；失败只挂 error
+  await mapLimit(list, WORKTREE_CONCURRENCY, async (item) => {
+    if (item.bare || !item.path) return;
+    try {
+      const st = await getStatus(item.path);
+      item.dirty = statusSummary(st);
+      // 有 upstream 才有 ahead/behind；无 upstream 时不挂这两个 key
+      if (typeof st.upstream === "string" && st.upstream.length > 0) {
+        item.ahead = st.ahead;
+        item.behind = st.behind;
+      }
+      const head = item.headSha || st.headSha || "";
+      if (head) item.headShort = head.slice(0, 12);
+    } catch (e) {
+      item.error = gitErrText(e);
+    }
+  });
   return { worktrees: list };
 }
 

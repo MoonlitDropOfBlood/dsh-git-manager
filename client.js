@@ -126,6 +126,14 @@ window.__ModuleLoader__.load({
 .gm-repo-chip-count{font-size:10px;line-height:14px;padding:0 5px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);flex:none}
 .gm-repo-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-error-primary);flex:none}
 
+/* Worktree 行内状态（review 方案 B）与作用域条（方案 A，2026-10-20） */
+.gm-wt-counts{font-size:11px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,monospace;flex:none;white-space:nowrap}
+.gm-wt-counts-conflict{color:var(--dsw-alias-state-error-primary);font-weight:500}
+.gm-wt-ab{font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);flex:none;white-space:nowrap}
+.gm-wt-row-active{background:var(--dsw-specific-sidebar-nav-item-active)}
+.gm-wt-scope{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:12px;color:var(--dsw-alias-label-secondary);border-bottom:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,transparent)}
+.gm-wt-scope-path{color:var(--dsw-alias-label-primary);font-family:ui-monospace,monospace;font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* 变更 Tab：按仓库分组的文件列表（子仓库支持 P0） */
 .gm-repogroup{margin-top:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
 .gm-repogroup-head{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--dsw-alias-bg-layer-1);font-size:12px}
@@ -1024,6 +1032,18 @@ window.__ModuleLoader__.load({
         [repoPath],
       );
 
+      // worktree 作用域（2026-10-20 review 方案 A）：{ root, path, branch }。
+      // root 与面板仓库不匹配即整体失效（面板重开/换会话目录自动回主仓库），
+      // 优先级高于子仓库选择——进入 worktree 时清空 repoSel，两种作用域互斥。
+      const [wtScope, setWtScope] = React.useState(null);
+      const wtScopeActive = !!(wtScope && wtScope.root === repoPath && typeof wtScope.path === "string" && wtScope.path);
+      const enterWorktree = React.useCallback((w) => {
+        setRepoSel({ root: repoPath, id: "" });
+        setWtScope({ root: repoPath, path: String(w.path || ""), branch: String(w.branch || "") });
+        setTab("changes"); // 「查看」= 切到变更页 review 该 worktree 的改动
+      }, [repoPath]);
+      const exitWorktree = React.useCallback(() => setWtScope(null), []);
+
       // 跨 Tab 范围对比请求（P1 §3.6）：变更 Tab 的指针跳转按钮用它把
       // 「在子仓库中查看 a..b」转成历史 Tab 的一次范围对比。
       // nonce 递增保证同一对 sha 再点一次也能重新触发（effect 只认 nonce 变化）；
@@ -1049,14 +1069,17 @@ window.__ModuleLoader__.load({
 
       // activeRepo = 当前选中节点（找不到即 null → 所有操作回落到主仓库）
       const activeRepo = (repos || []).find((n) => n && n.id === activeRepoId) || null;
-      const scopedRepoPath = (activeRepo && activeRepo.path) ? activeRepo.path : repoPath;
+      // 作用域优先级：worktree > 子仓库 > 主仓库（wtScopeActive 时六 Tab 全部
+      // 作用于该 worktree——变更/提交/hunk 操作/历史/分支都是它自己的）
+      const scopedRepoPath = wtScopeActive ? wtScope.path : ((activeRepo && activeRepo.path) ? activeRepo.path : repoPath);
 
       // 重新选 repo 时探活 + 并行拉仓库树（两者互不阻塞）
       React.useEffect(() => {
         refreshTree();
       }, [refreshTree]);
 
-      // 重新选 repo 时探活（作用于当前作用域仓库 scopedRepoPath）
+      // 重新选 repo / 进入退出 worktree 作用域时探活（作用于当前作用域仓库
+      // scopedRepoPath——deps 必须是它本身：repoPath 打开面板后恒定不变）
       React.useEffect(() => {
         let alive = true;
         async function probe1() {
@@ -1069,6 +1092,12 @@ window.__ModuleLoader__.load({
           setNotice(null);
           const r = await unwrap(await remote.overview({ path: scopedRepoPath }));
           if (!alive) return;
+          // worktree 作用域目标已不可用（目录被删/被外部 remove）→ 自动退回
+          // 主仓库重探，避免面板停在「不是 git 仓库」的死态
+          if (wtScopeActive && (!r.ok || !r.value.probe || r.value.probe.isRepo === false)) {
+            setWtScope(null);
+            return;
+          }
           if (r.ok) {
             setProbe(r.value.probe);
             setStatus(r.value.status);
@@ -1081,7 +1110,7 @@ window.__ModuleLoader__.load({
         }
         probe1();
         return () => { alive = false; };
-      }, [repoPath]);
+      }, [scopedRepoPath]);
 
       // 15s 静默轮询（作用域仓库）
       // P1 §3.3：仓库树一起刷——六 Tab 徽标与切换器红点是对**所有仓库** dirty 的求和，
@@ -1222,8 +1251,9 @@ window.__ModuleLoader__.load({
           headNetBtn("Fetch"),
           headNetBtn("Pull"),
           headNetBtn("Push", true),
-          // P2：多仓库时的批量 fetch / pull（单仓库时无意义，不渲染）
-          Array.isArray(repos) && repos.length > 1
+          // P2：多仓库时的批量 fetch / pull（单仓库时无意义，不渲染；
+          // worktree 作用域期间隐藏——批量作用于主仓库树，与作用域无关）
+          Array.isArray(repos) && repos.length > 1 && !wtScopeActive
             ? React.createElement("button", {
                 className: "gm-mini",
                 disabled: !!busy,
@@ -1231,7 +1261,7 @@ window.__ModuleLoader__.load({
                 onClick: () => bulkRemote("fetch"),
               }, busy === "Fetch 全部" ? React.createElement("span", { className: "gm-spinner gm-spinner-sm", key: "sp" }) : null, busy === "Fetch 全部" ? "Fetch 全部…" : "Fetch 全部")
             : null,
-          Array.isArray(repos) && repos.length > 1
+          Array.isArray(repos) && repos.length > 1 && !wtScopeActive
             ? React.createElement("button", {
                 className: "gm-mini",
                 disabled: !!busy,
@@ -1284,12 +1314,14 @@ window.__ModuleLoader__.load({
         return null;
       })();
 
-      // 六 Tab 徽标：仓库树可用时聚合所有节点的 dirty 计数，否则回落到当前 status
+      // 六 Tab 徽标：仓库树可用时聚合所有节点的 dirty 计数，否则回落到当前 status。
+      // worktree 作用域期间徽标跟随作用域仓库（树是主仓库的，与作用域无关）。
       const hasTree = Array.isArray(repos) && repos.length > 0;
-      const conflictedCount = hasTree
+      const badgeFromTree = hasTree && !wtScopeActive;
+      const conflictedCount = badgeFromTree
         ? repos.reduce((n, x) => n + ((x && x.dirty && x.dirty.conflicted) || 0), 0)
         : ((status && status.conflicted) ? status.conflicted.length : 0);
-      const changesCount = hasTree
+      const changesCount = badgeFromTree
         ? repos.reduce((n, x) => n + repoDirtyTotal(x && x.dirty), 0)
         : (status ? (status.staged.length + status.unstaged.length + status.untracked.length) : 0);
 
@@ -1329,16 +1361,28 @@ window.__ModuleLoader__.load({
         }
       };
 
-      // 仓库切换器（分支 / 历史 / 冲突 / Worktree / 设置 Tab 顶部；变更 Tab 自带分组视图，不重复渲染）
-      const repoBar = (tab === "changes" || !hasTree) ? null : React.createElement(RepoSwitcher, {
+      // 仓库切换器（分支 / 历史 / 冲突 / Worktree / 设置 Tab 顶部；变更 Tab 自带分组视图，不重复渲染）。
+      // worktree 作用域期间不渲染——子仓库切换会顶掉 worktree 作用域，先退出再切。
+      const repoBar = (tab === "changes" || !hasTree || wtScopeActive) ? null : React.createElement(RepoSwitcher, {
         repos,
         activeRepoId,
         setActiveRepoId,
       });
 
+      // worktree 作用域提示条：作用域从哪来、怎么退出（分支优先取实时 status，
+      // worktree 内切分支后不至于显示旧名）
+      const wtScopeBar = wtScopeActive ? React.createElement("div", { className: "gm-wt-scope" },
+        React.createElement("span", { className: "gm-sub-badge gm-sub-badge-ok", style: { flex: "none" } }, "Worktree 作用域"),
+        React.createElement("span", { className: "gm-wt-scope-path", title: wtScope.path }, wtScope.path),
+        ((status && status.branch) || wtScope.branch) ? React.createElement("span", { className: "gm-repogroup-branch" }, (status && status.branch) || wtScope.branch) : null,
+        React.createElement("span", { style: { flex: 1 } }),
+        React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", whiteSpace: "nowrap" } }, "变更 / 提交 / 分支操作均作用于该 worktree"),
+        React.createElement("button", { className: "gm-btn", onClick: exitWorktree, title: "退出 worktree 作用域，回到面板主仓库" }, "返回主仓库"),
+      ) : null;
+
       // 六 Tab 的 repoPath 换源：作用域仓库（选中子仓库时它的 toplevel）——现有全部
       // remote.*({path: repoPath}) 调用点无需改写逻辑，只换值来源（契约 §3.1）。
-      const tabProps = { remote, repoPath: scopedRepoPath, rootRepoPath: repoPath, repos, activeRepo, setActiveRepoId, refreshTree, probe, status, busy, act, setError, onStatus: setStatus, onSwitchTab: setTab, registerWorkspace, rangeReq, requestRange };
+      const tabProps = { remote, repoPath: scopedRepoPath, rootRepoPath: repoPath, repos, activeRepo, setActiveRepoId, refreshTree, probe, status, busy, act, setError, onStatus: setStatus, onSwitchTab: setTab, registerWorkspace, rangeReq, requestRange, wtScopeActive, wtScopePath: wtScopeActive ? wtScope.path : null, enterWorktree, exitWorktree };
       const tabContent = (() => {
         if (!probe || !probe.isRepo) {
           return React.createElement("div", { className: "gm-empty" }, "该目录不是 Git 仓库。点击上方「初始化为 git 仓库」开始，或选择其他目录。");
@@ -1361,6 +1405,7 @@ window.__ModuleLoader__.load({
         busy ? React.createElement("div", { className: "gm-progress", key: "gm-progress", "aria-hidden": "true" }) : null,
         head,
         banner,
+        wtScopeBar,
         React.createElement("div", { className: "gm-main" },
           tabNav,
           React.createElement("div", { className: "gm-content" },
@@ -1440,12 +1485,17 @@ window.__ModuleLoader__.load({
       const remote = props.remote;
       const repoPath = props.repoPath;                              // 作用域仓库（其余 Tab / stash / diff 默认）
       const rootRepoPath = props.rootRepoPath || repoPath;           // 打开面板时的根仓库
-      const rootIsScoped = !repoPath || repoPath === rootRepoPath;
+      // worktree 作用域：主仓库的仓库树与该 worktree 无关（repoTree 只含子仓库，
+      // 不含 worktree）——退化为单组视图，组 = worktree 自身，组内操作照常走
+      // 该组 toplevel（= worktree 目录）。
+      const repos = props.wtScopeActive ? null : (Array.isArray(props.repos) ? props.repos : null);
+      // worktree 作用域下单组的 status 复用面板级 props.status（probe effect 已
+      // 按 scopedRepoPath 拉的就是 worktree 的 status）
+      const rootIsScoped = props.wtScopeActive || !repoPath || repoPath === rootRepoPath;
       const status = props.status;
       const act = props.act;
       const setError = props.setError;
       const refreshTree = props.refreshTree;
-      const repos = Array.isArray(props.repos) ? props.repos : null;
 
       const [diffWin, setDiffWin] = React.useState(null); // { file, scope, repoPath, groupName, gitlink, ptr, loading, text, truncated }
       const [blameWin, setBlameWin] = React.useState(null); // { file, ref, repoPath, groupName, loading, lines, truncated }
@@ -1470,7 +1520,7 @@ window.__ModuleLoader__.load({
       // 分组列表：root 在最上，其余按 relPath 字典序；repos 不可用时退化为单组（= 作用域仓库）
       const groupNodes = (repos && repos.length > 0)
         ? orderRepoNodes(repos)
-        : [{ id: "", relPath: "", name: "主仓库", kind: "root", path: repoPath, dirty: null }];
+        : [{ id: "", relPath: "", name: props.wtScopeActive ? "Worktree" : "主仓库", kind: "root", path: repoPath, dirty: null }];
       const childNodes = groupNodes.filter((n) => n && n.relPath);
       const nestedRels = childNodes.filter((n) => n.kind === "nested").map((n) => n.relPath);
       const childNodeByRel = {};
@@ -3568,21 +3618,33 @@ window.__ModuleLoader__.load({
       const remote = props.remote;
       const repoPath = props.repoPath;
       const act = props.act;
+      const wtScopePath = props.wtScopePath || null; // 当前作用域中的 worktree 路径（null = 未进入）
       const [worktrees, setWorktrees] = React.useState(null);
       const [addDlg, setAddDlg] = React.useState(false);
       const [adding, setAdding] = React.useState({ path: "", newBranch: "", startPoint: "" });
       const [confirming, setConfirming] = React.useState(null);
       const [notice, setNotice] = React.useState(null);
 
-      const refresh = async () => {
-        const r = await unwrap(await remote.worktrees({ path: repoPath }));
-        if (r.ok) setWorktrees(r.value.worktrees);
-      };
+      const refresh = React.useCallback(async () => {
+        try {
+          const r = await unwrap(await remote.worktrees({ path: repoPath }));
+          if (r.ok) setWorktrees(r.value.worktrees);
+        } catch (_) { /* 查询失败保持原列表；错误统一走 act 的错误条 */ }
+      }, [remote, repoPath]);
 
-      React.useEffect(() => { refresh(); }, [repoPath]);
+      React.useEffect(() => { refresh(); }, [refresh]);
+
+      // 挂载期间 15s 轮询：行内脏计数（Host 每行跑一次 status）随外部操作漂移
+      React.useEffect(() => {
+        const t = setInterval(() => { refresh(); }, 15000);
+        return () => clearInterval(t);
+      }, [refresh]);
 
       // 切换作用域仓库 → 清空上一个仓库的 worktree 列表（避免短暂串仓库）
       React.useEffect(() => { setWorktrees(null); setNotice(null); }, [repoPath]);
+
+      // mutation 的 value 就是最新 worktrees 列表（含行内状态），直接采用
+      const applyResult = (v) => { if (v && Array.isArray(v.worktrees)) setWorktrees(v.worktrees); };
 
       const doAdd = async () => {
         if (!adding.path) return;
@@ -3595,7 +3657,7 @@ window.__ModuleLoader__.load({
         if (v === undefined) return;
         setAddDlg(false);
         setAdding({ path: "", newBranch: "", startPoint: "" });
-        refresh();
+        applyResult(v);
         // act 失败时返回 undefined；只在添加成功时注册工作区
         if (props.registerWorkspace) {
           const msg = await props.registerWorkspace(wtPath);
@@ -3604,15 +3666,29 @@ window.__ModuleLoader__.load({
       };
       const doRemove = async (wtPath, force) => {
         setConfirming(null);
-        await act("worktreeRemove", () => remote.worktreeRemove({ path: repoPath, worktreePath: wtPath, force: !!force }));
-        refresh();
+        const v = await act("worktreeRemove", () => remote.worktreeRemove({ path: repoPath, worktreePath: wtPath, force: !!force }));
+        applyResult(v);
       };
       const doPrune = async () => {
-        await act("worktreePrune", () => remote.worktreePrune({ path: repoPath }));
-        refresh();
+        const v = await act("worktreePrune", () => remote.worktreePrune({ path: repoPath }));
+        applyResult(v);
       };
 
       if (!worktrees) return React.createElement("div", { className: "gm-empty" }, "加载 Worktree…");
+
+      // 行内状态串（review 方案 B）："2+ 1~ 3?" = 暂存/未暂存/未跟踪计数；全 0 显示「干净」
+      const countsOf = (w) => {
+        if (!w.dirty) return null;
+        const parts = [];
+        if (w.dirty.staged > 0) parts.push(w.dirty.staged + "+");
+        if (w.dirty.unstaged > 0) parts.push(w.dirty.unstaged + "~");
+        if (w.dirty.untracked > 0) parts.push(w.dirty.untracked + "?");
+        if (parts.length === 0) parts.push("干净");
+        const title = "未提交改动：暂存 " + w.dirty.staged + " / 未暂存 " + w.dirty.unstaged
+          + " / 未跟踪 " + w.dirty.untracked
+          + (w.dirty.conflicted > 0 ? " / 冲突 " + w.dirty.conflicted : "");
+        return { text: parts.join(" "), title, conflicted: w.dirty.conflicted || 0 };
+      };
 
       return React.createElement(React.Fragment, null,
         notice ? React.createElement("div", { className: "gm-notice" }, notice) : null,
@@ -3623,13 +3699,29 @@ window.__ModuleLoader__.load({
             React.createElement("button", { className: "gm-btn", onClick: doPrune }, "Prune"),
             React.createElement("button", { className: "gm-btn gm-btn-primary", onClick: () => setAddDlg(true) }, "添加"),
           ),
-          worktrees.map((w) => React.createElement("div", { key: w.path, className: "gm-file" },
-            React.createElement("span", { className: "gm-file-kind " + (w.current ? "gm-file-kind-added" : (w.bare ? "gm-file-kind-renamed" : "")) }, w.current ? "★" : (w.bare ? "B" : "L")),
-            React.createElement("span", { className: "gm-file-path" }, w.path),
-            React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)" } }, w.bare ? "(bare)" : (w.detached ? "(detached " + (w.headSha || "").slice(0, 7) + ")" : (w.branch || "(?)"))),
-            React.createElement("span", { style: { flex: 1 } }),
-            w.current ? null : React.createElement("button", { className: "gm-btn gm-btn-danger", onClick: () => setConfirming({ kind: "remove", path: w.path }) }, "删除"),
-          )),
+          worktrees.map((w) => {
+            // 作用域命中比较对大小写不敏感（Windows 路径 + git 输出正斜杠混排）
+            const scoped = !!(wtScopePath && w.path && (w.path === wtScopePath || w.path.toLowerCase() === wtScopePath.toLowerCase()));
+            const counts = countsOf(w);
+            const ahead = (w.ahead || 0), behind = (w.behind || 0);
+            return React.createElement("div", { key: w.path, className: "gm-file" + (scoped ? " gm-wt-row-active" : "") },
+              React.createElement("span", { className: "gm-file-kind " + (w.current ? "gm-file-kind-added" : (w.bare ? "gm-file-kind-renamed" : "")) }, w.current ? "★" : (w.bare ? "B" : "L")),
+              React.createElement("span", { className: "gm-file-path", title: w.path }, w.path),
+              React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)" } }, w.bare ? "(bare)" : (w.detached ? ("(detached " + (w.headShort || (w.headSha || "").slice(0, 7)) + ")") : (w.branch || "(?)"))),
+              w.error ? React.createElement("span", { className: "gm-sub-badge gm-sub-badge-error", title: "状态查询失败：" + w.error }, "状态查询失败") : null,
+              counts ? React.createElement("span", { className: "gm-wt-counts" + (counts.conflicted > 0 ? " gm-wt-counts-conflict" : ""), title: counts.title }, counts.text) : null,
+              counts && counts.conflicted > 0 ? React.createElement("span", { className: "gm-repo-dot", title: "该 worktree 有 " + counts.conflicted + " 个冲突文件" }) : null,
+              ahead > 0 || behind > 0 ? React.createElement("span", { className: "gm-wt-ab", title: "与上游分支的差距：↑ 本地领先提交数，↓ 本地落后提交数" }, "↑" + ahead + " ↓" + behind) : null,
+              scoped ? React.createElement("span", { className: "gm-sub-badge gm-sub-badge-ok" }, "作用域中") : null,
+              React.createElement("span", { style: { flex: 1 } }),
+              !w.bare && !w.current && !scoped ? React.createElement("button", {
+                className: "gm-btn",
+                title: "面板作用域切进该 worktree：变更 / 提交 / hunk 操作 / 历史全部作用于它",
+                onClick: () => { if (props.enterWorktree) props.enterWorktree(w); },
+              }, "查看") : null,
+              !w.current && !scoped ? React.createElement("button", { className: "gm-btn gm-btn-danger", onClick: () => setConfirming({ kind: "remove", path: w.path }) }, "删除") : null,
+            );
+          }),
         ),
         React.createElement(ConfirmDialog, {
           open: !!confirming,

@@ -114,6 +114,13 @@ Client 渲染时：固定 `ROW_H=32`，`COL_W` 随车道数自适应（≤8 车�
 - **Client 模型**：GitPanel 以 `repoSel{root,id}` 派生 `activeRepoId`/`scopedRepoPath`，六 Tab 的 `repoPath` 全部换源为 scoped（切仓库先清 status 防串仓；Host 未上线 repoTree 时整体回落旧行为）；变更 Tab 按仓库分组聚合（root 组复用面板级 status 不双拉，其余 initialized 节点并行拉取 + 30s 轮询），组内操作传该组自己的 toplevel；`RepoSwitcher` 仅 `tab!=="changes"` 时渲染；提交框带仓库 select。
 - **submodule 管理五方法（P2，2026-10-13）**：`submoduleInit/Update/Sync/Deinit/Add`（git-core.mjs 段尾）——参数一律 **`subPath`**（相对 toplevel 路径，过 safeJoin；仅 add 的 `--name` 才是注册名）；update/add 走 runGitNet（clone 可能联网 180s）；本地路径 url 自动前置 `-c protocol.file.allow=always`（显式用户操作，权衡见代码注释）；**`submoduleAdd` 捕获 `A git directory ... is found locally` 残留错误后以 `--force` 重试一次**（卸载后重加必现，勿退化）；deinit subPath 必填（不带 `--` 会清全部），UI 侧必须 `force:true` 与弹窗文案对齐；**`git submodule status` 的 `-` 前缀 = 工作副本未 populate（非未注册），init 后仍为 `-`，UI 必须 init+update 成对调用**（F2 实测）。设置 Tab「子仓库」管理区 + 变更 Tab 组头「初始化」+ 头部「Fetch 全部 / Pull 全部」的 e2e 见 `scripts/cdp-e2e-p2.mjs`（27/27，含 Portal 输入 `Input.insertText`、多行同名按钮按行定位等踩坑记录，方案 §11）。
 
+### 7. Worktree 作用域与行内状态（2026-10-20，方案 `docs/plans/2026-10-20-worktree-review-scope.md`）
+
+- **动机**：linked worktree 在工作区外、`repoTree` 不发现它，变更 Tab 看不到其改动；且 Host 全部方法本就以 `probeRepo(path).toplevel` 运行，对 worktree 目录天然可用——缺的只是 client 作用域与入口。
+- **作用域优先级 `worktree > 子仓库 > 主仓库`**：GitPanel 级 `wtScope{root,path,branch}`（root 不匹配即整体失效，面板重开自动回主仓库）；`enterWorktree` 同时清空 `repoSel`（与子仓库作用域互斥）并切到变更 Tab；`.gm-wt-scope` 作用域条给「返回主仓库」。作用域期间：RepoSwitcher / Fetch-Pull 全部批量按钮隐藏、六 Tab 徽标改按作用域仓库 status（不再聚合主仓库树）、**变更 Tab 退化为单组视图**（`repos` 置 null + `rootIsScoped` 视为 true，组状态复用面板级 status，组内操作照常走该组 toplevel = worktree 目录）。
+- **探活 effect deps 必须是 `scopedRepoPath`**（曾只挂恒定的 `repoPath`，作用域变化不重探——注释与行为不符的存量 bug，本次修正）；作用域目标不可用（被删/外部 remove）时自动 `setWtScope(null)` 回主仓库重探，面板不会停在「不是 git 仓库」死态。
+- **行内状态（B）**：`getWorktrees` 对非 bare 条目限 4 并发（`WORKTREE_CONCURRENCY`，mapLimit）跑 `getStatus` 富化——`dirty`=statusSummary 四数字恒挂、`ahead/behind` 仅有 upstream 才挂、`headShort`=headSha 前 12 位非空才挂、失败只挂 `error`；bare 跳过。`worktreeSchema` 同名 optional 字段，**无新增 Remote 方法**。client 行渲染 `2+ 1~ 3?` 计数串 / 冲突红点 / `↑n ↓n` chip；WorktreesTab 15s 轮询，add/remove/prune 的返回值就是最新列表（含富化）直接采用。
+
 ## 开发 / 验证
 
 ```bash

@@ -756,10 +756,32 @@ test("getWorktrees: live 仓库 worktree add 后列表", async () => {
   try {
     const wt = join(tmp + "-wt");
     await runShell(tmp, ["git", "worktree", "add", "-b", "wt-branch", wt]);
+    // linked worktree 里造脏：改一个已跟踪文件（unstaged）+ 加一个未跟踪文件（untracked）
+    await writeFile(join(wt, "README.md"), "# init\nlinked changed\n");
+    await writeFile(join(wt, "untracked.txt"), "untracked\n");
     const r = await core.getWorktrees(tmp);
     eq("count", r.worktrees.length, 2);
     check("current 主仓标记", r.worktrees.some((w) => w.current === true));
     check("linked worktree 存在", r.worktrees.some((w) => w.branch === "wt-branch"));
+
+    // --- 行内状态富化（非 bare worktree） ---
+    const linked = r.worktrees.find((w) => w.branch === "wt-branch");
+    const mainWt = r.worktrees.find((w) => w.current === true);
+    check("linked 条目取到", !!linked);
+    check("linked dirty.unstaged >= 1", linked.dirty && linked.dirty.unstaged >= 1, JSON.stringify(linked.dirty));
+    check("linked dirty.untracked >= 1", linked.dirty && linked.dirty.untracked >= 1, JSON.stringify(linked.dirty));
+    check("linked dirty 四个计数都是数字", !!linked.dirty
+      && typeof linked.dirty.staged === "number" && typeof linked.dirty.unstaged === "number"
+      && typeof linked.dirty.untracked === "number" && typeof linked.dirty.conflicted === "number",
+      JSON.stringify(linked.dirty));
+    check("linked headShort 长度 12", typeof linked.headShort === "string" && linked.headShort.length === 12, "headShort=" + linked.headShort);
+    check("linked 无 error 字段", !Object.hasOwn(linked, "error"), "error=" + linked.error);
+    // 新分支 wt-branch 没有 upstream → 不挂 ahead/behind key
+    check("linked 无 ahead key", !Object.hasOwn(linked, "ahead"), "ahead=" + linked.ahead);
+    check("linked 无 behind key", !Object.hasOwn(linked, "behind"), "behind=" + linked.behind);
+    // 主仓条目也带 dirty 计数
+    check("主仓条目带 dirty", !!mainWt && !!mainWt.dirty && typeof mainWt.dirty.unstaged === "number", JSON.stringify(mainWt && mainWt.dirty));
+    check("主仓条目带 headShort", !!mainWt && typeof mainWt.headShort === "string" && mainWt.headShort.length === 12, "headShort=" + (mainWt && mainWt.headShort));
   } finally {
     await rm(tmp, { recursive: true, force: true });
     if (existsSync(tmp + "-wt")) await rm(tmp + "-wt", { recursive: true, force: true });
@@ -3596,6 +3618,7 @@ function wireCheck(method, value) {
   if (!schema) throw new Error("typert.host.js 没有 " + method + " 的 invocation");
   const parsed = schema.parse({ ok: true, value }); // 第一道：strict zod schema
   assertJsonSafe(parsed, "root", new Set());         // 第二道：JSON-safe
+  return parsed;                                     // 返回 parse 后的结果，便于调用方断言字段真的穿过了 schema
 }
 
 live("wire: 全部查询/变更真实返回值过 strict schema + JSON-safe", async (tmp) => {
@@ -3615,7 +3638,26 @@ live("wire: 全部查询/变更真实返回值过 strict schema + JSON-safe", as
   wireCheck("branches", await core.getBranches(tmp));
   const logRes = await core.getLog(tmp, { maxCount: 50 });
   wireCheck("log", Object.assign({}, logRes, { graph: computeGraph(logRes.commits) })); // 与 index.js log 同组装
-  wireCheck("worktrees", await core.getWorktrees(tmp));
+  // worktrees：临时挂一个 linked worktree（路径在 tmp 外）并写一个未跟踪文件，
+  // 让行内富化字段（dirty/headShort）真实穿过 strict schema + assertJsonSafe
+  const wireWt = join(tmp + "-wt");
+  try {
+    await core.addWorktree(tmp, wireWt, "wire-wt-branch");
+    await writeFile(join(wireWt, "wt-untracked.txt"), "wt untracked\n");
+    const wtParsed = wireCheck("worktrees", await core.getWorktrees(tmp));
+    // strict schema 解析后富化字段仍在（不能被剥掉），且计数是数字
+    const wtLinked = (wtParsed.value.worktrees || []).find((w) => w.branch === "wire-wt-branch");
+    check("wire: linked worktree 的 dirty/headShort 穿过 strict schema 后仍在",
+      !!wtLinked && !!wtLinked.dirty && typeof wtLinked.dirty.untracked === "number"
+      && typeof wtLinked.headShort === "string" && wtLinked.headShort.length === 12,
+      JSON.stringify(wtParsed.value.worktrees));
+  } finally {
+    // 有未跟踪文件 → remove 必须 force；清理后 tmp 自身的 status 断言不受影响
+    if (existsSync(wireWt)) {
+      try { await core.removeWorktree(tmp, wireWt, true); } catch (_) { /* 兜底：下面直接删目录 */ }
+      if (existsSync(wireWt)) await rm(wireWt, { recursive: true, force: true });
+    }
+  }
   wireCheck("diff", await core.getDiff(tmp, { scope: "worktree" }));
   wireCheck("diff", await core.getDiff(tmp, { scope: "staged" }));
   wireCheck("diff", await core.getDiff(tmp, { scope: "untracked", file: "untracked.txt" }));

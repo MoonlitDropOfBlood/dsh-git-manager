@@ -128,6 +128,17 @@ const worktreeSchema = z.object({
   locked: z.union([z.boolean().readonly(), z.string().readonly()]).readonly().optional(),
   prunable: z.union([z.boolean().readonly(), z.string().readonly()]).readonly().optional(),
   current: z.boolean().readonly().optional(),
+  // 行内状态富化（getWorktrees：非 bare worktree 才有；可选字段有值才挂 key）
+  headShort: z.string().readonly().optional(),
+  dirty: z.object({
+    staged: z.number().readonly(),
+    unstaged: z.number().readonly(),
+    untracked: z.number().readonly(),
+    conflicted: z.number().readonly(),
+  }).readonly().optional(),
+  ahead: z.number().readonly().optional(),
+  behind: z.number().readonly().optional(),
+  error: z.string().readonly().optional(),
 }).readonly();
 
 const remoteSchema = z.object({
