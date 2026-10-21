@@ -102,7 +102,7 @@ jobs:
             - 分支与 tag：新建 / 切换 / 改名 / 删除 / 合并，与当前分支对比 diff；tag 新建 / push / 删除。
             - 历史：分支线图形（Host 侧布局 + Client SVG）+ 过滤（ref/路径/作者/grep/日期）+ 范围对比 + 交互式 rebase（todo 编排）+ revert / reset / fixup / cherry-pick / undo。
             - 冲突：ours / theirs / 手动编辑（三栏对照）；继续 / 中止合并。
-            - Worktree：添加（成功后自动注册为 DSH 工作区）/ 删除 / prune。
+            - Worktree：添加（成功后自动注册为 DSH 工作区）/ 删除 / prune；**行内状态**（`2+ 1~ 3?` 脏计数 / 冲突红点 / `↑n ↓n` 上游差距，不点进去就知道哪个 worktree 有活）；**作用域切进**——行上「查看」把面板作用域切进该 worktree，变更 / hunk 级操作 / 提交 / 历史 / 分支全部作用于它，顶部作用域条一键返回主仓库。
             - blame / reflog / remote / config 管理。
             - **子仓库支持**：仓库树发现（git submodule + 嵌套独立仓库）、变更 Tab 按仓库分组聚合、五 Tab 仓库切换器、指针 diff「在子仓库中查看 a..b」跳转、指针冲突 ours/theirs 解决、设置 Tab「子仓库」管理区（更新/同步/卸载/初始化/添加子模块/嵌套仓库就地注册）、全仓库批量 fetch/pull，以及嵌套仓库误暂存/误删双防护。
 
