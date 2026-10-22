@@ -9,3 +9,5 @@ node_modules/
 dist/
 package-lock.json
 .npm-cache/
+# ACL 诊断本地报告（排障产物）
+.acl-diag/
