@@ -89,7 +89,12 @@ const clickTab = (label) => `(() => {
 const readState = `JSON.stringify({
   applyRan: true,
   btn: !!document.querySelector('button.gm-toolbtn'),
-  btnCwd: (document.querySelector('button.gm-toolbtn')||{title:''}).title.split('\\n')[1] || null,
+  // title 结构："Git 管理面板" / ["分支：<branch>"] / <cwd> —— cwd 恒为最后一行，
+  // 所以取 split 后 pop 末行（旧的取第 2 行在加了分支行后会错位）
+  btnCwd: (document.querySelector('button.gm-toolbtn')||{title:''}).title.split('\\n').pop() || null,
+  btnTitle: (document.querySelector('button.gm-toolbtn')||{title:''}).title || '',
+  btnLabel: (document.querySelector('button.gm-toolbtn .gm-toolbtn-label')||{}).title || '',
+  btnAria: (document.querySelector('button.gm-toolbtn')||{getAttribute(){return null;}}).getAttribute('aria-label') || '',
   panelOpen: !!document.querySelector('body > .gm-overlay .gm-panel'),
   panelTabs: Array.from(document.querySelectorAll('body > .gm-overlay .gm-tab')).map((e) => e.textContent.trim().replace(/[0-9]+$/, '')).slice(0, 8),
   commitBox: !!document.querySelector('body > .gm-overlay .gm-commit textarea'),
@@ -114,6 +119,13 @@ expect(consoleLines.some((l) => l.includes("client apply() ran, mounting UI")), 
 expect(state.btn === true, "composer 入口按钮出现（probe 判定目标目录是 git 仓库）");
 
 if (state.btn === true) {
+  // ---- 长分支名可读性（issue #1）：截断后仍能通过 title/aria-label 拿到全名 ----
+  if (state.btnLabel) {
+    expect(String(state.btnTitle).includes(state.btnLabel), "入口按钮 title 含完整分支名（长名折叠后悬停可见）");
+    expect(String(state.btnAria).includes(state.btnLabel), "入口按钮 aria-label 含完整分支名（读屏可读）");
+  } else {
+    skip("入口按钮分支名 title/aria-label", "目标仓库无分支名（label 为空），title 保持旧格式");
+  }
   // ---- 打开面板 ----
   await cdp("Runtime.evaluate", { expression: "document.querySelector('button.gm-toolbtn').click()", returnByValue: true });
   await sleep(2500); // 面板打开 + overview/log RPC

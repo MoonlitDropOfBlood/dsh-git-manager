@@ -3471,6 +3471,45 @@ test("static: client.js 入口模型（composer 工具行唯一入口 + 无 FAB/
 });
 
 // ============================================================================
+// 长分支名可读性（issue #1）：三处分支名都被 CSS 省略号折叠过——
+//   ① composer 入口按钮 label span（曾无 title，悬停也看不到全名）
+//   ② 面板头部仓库行分支药丸（有 title，但宽度曾只有 160px）
+//   ③ worktree 作用域条分支 span（曾无 title）
+// 守卫：折叠处必须有 title（悬停可见全名）+ 宽度放宽到不轻易截断。
+// ============================================================================
+
+test("static: 长分支名可见性（入口按钮 / 分支药丸 / worktree 作用域条都有 title + 宽度放宽）", () => {
+  const clientSrc = readFileSync(join(__projectRoot, "client.js"), "utf8");
+
+  // ① composer 入口按钮：label span 带 title（= 完整分支名）
+  check("入口按钮 label span 带 title（截断后悬停可见全名）",
+    /React\.createElement\("span", \{ className: "gm-toolbtn-label", title: label \}, label\)/.test(clientSrc));
+  // 按钮 title / aria-label 必须带分支名；label 为空时保持旧格式（不产生「分支：」脏输出）
+  check("入口按钮 title 含分支名且 label 为空时回落旧格式",
+    clientSrc.includes('title: label ? "Git 管理面板\\n分支：" + label + "\\n" + cwd : "Git 管理面板\\n" + cwd,'));
+  check("入口按钮 aria-label 含分支名且 label 为空时回落旧值",
+    clientSrc.includes('"aria-label": label ? "打开 Git 管理面板（分支：" + label + "）" : "打开 Git 管理面板",'));
+
+  // ② 面板头部仓库行分支药丸：原本已有 title，宽度 160 → 260
+  check("仓库组分支药丸带 title",
+    /React\.createElement\("span", \{ className: "gm-repogroup-branch", title: "分支：" \+ branchText \}, branchText\)/.test(clientSrc));
+
+  // ③ worktree 作用域条分支 span：补 title
+  check("worktree 作用域条分支 span 带 title",
+    /React\.createElement\("span", \{ className: "gm-repogroup-branch", title: "分支：" \+ \(\(status && status\.branch\) \|\| wtScope\.branch\) \}/.test(clientSrc));
+
+  // CSS 宽度下限：.gm-toolbtn-label ≥ 240px、.gm-repogroup-branch ≥ 260px
+  const toolLabelRule = clientSrc.match(/\.gm-toolbtn-label\{([^}]*)\}/);
+  check("找到 .gm-toolbtn-label CSS 规则", !!toolLabelRule);
+  const toolLabelWidth = toolLabelRule ? Number((toolLabelRule[1].match(/max-width:(\d+)px/) || [])[1]) : 0;
+  check(".gm-toolbtn-label max-width ≥ 240px（实际 " + toolLabelWidth + "px）", toolLabelWidth >= 240);
+  const branchRule = clientSrc.match(/\.gm-repogroup-branch\{([^}]*)\}/);
+  check("找到 .gm-repogroup-branch CSS 规则", !!branchRule);
+  const branchWidth = branchRule ? Number((branchRule[1].match(/max-width:(\d+)px/) || [])[1]) : 0;
+  check(".gm-repogroup-branch max-width ≥ 260px（实际 " + branchWidth + "px）", branchWidth >= 260);
+});
+
+// ============================================================================
 // 跨版本 strict codec 双形态 + 宿主版本声明（2026-09-24 实测 21 个 typert-loader 版本矩阵）
 //   - ≤0.1.6-alpha.1：loader/registry/gateway 校验并使用 codec.schema（zod .parse）
 //   - ≥0.1.6-alpha.2（含 0.1.7-rc.x）：校验 codec.create() 工厂，网关解码 codec.create().parse()

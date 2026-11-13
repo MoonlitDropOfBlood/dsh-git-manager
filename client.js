@@ -72,7 +72,7 @@ window.__ModuleLoader__.load({
 .gm-toolbtn{display:inline-flex;align-items:center;gap:5px;height:28px;margin-left:-4px;padding:0 7px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;line-height:1}
 .gm-toolbtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .gm-toolbtn svg{flex:none}
-.gm-toolbtn-label{max-width:140px;overflow:hidden;text-overflow:ellipsis}
+.gm-toolbtn-label{max-width:240px;overflow:hidden;text-overflow:ellipsis}
 
 /* 面板头部 ahead/behind 只读徽章 */
 .gm-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--dsw-alias-label-primary);line-height:18px}
@@ -140,7 +140,7 @@ window.__ModuleLoader__.load({
 .gm-repogroup-head>svg{flex:none;color:var(--dsw-alias-label-secondary)}
 .gm-repogroup-name{font-weight:500;color:var(--dsw-alias-label-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gm-repogroup-rel{font-size:11px;color:var(--dsw-alias-label-tertiary);font-family:ui-monospace,monospace;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gm-repogroup-branch{font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none}
+.gm-repogroup-branch{font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none}
 .gm-repogroup-counts{font-size:11px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,monospace;flex:none}
 .gm-repogroup-body{padding:4px 4px 8px}
 .gm-sub-badge{font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;white-space:nowrap;flex:none}
@@ -483,8 +483,9 @@ window.__ModuleLoader__.load({
       return React.createElement("button", {
         type: "button",
         className: "gm-toolbtn",
-        title: "Git 管理面板\n" + cwd,
-        "aria-label": "打开 Git 管理面板",
+        // 长分支名会被 CSS 折叠成省略号：title 必须带分支名，否则悬停看不到全名
+        title: label ? "Git 管理面板\n分支：" + label + "\n" + cwd : "Git 管理面板\n" + cwd,
+        "aria-label": label ? "打开 Git 管理面板（分支：" + label + "）" : "打开 Git 管理面板",
         onClick: () => setOpen(true, cwd),
       },
         // git-branch 图标（Lucide 24×24）
@@ -494,7 +495,7 @@ window.__ModuleLoader__.load({
           React.createElement("circle", { cx: 6, cy: 18, r: 3 }),
           React.createElement("path", { d: "M18 9a9 9 0 0 1-9 9" }),
         ),
-        label ? React.createElement("span", { className: "gm-toolbtn-label" }, label) : null,
+        label ? React.createElement("span", { className: "gm-toolbtn-label", title: label }, label) : null,
       );
     }
 
@@ -1374,7 +1375,7 @@ window.__ModuleLoader__.load({
       const wtScopeBar = wtScopeActive ? React.createElement("div", { className: "gm-wt-scope" },
         React.createElement("span", { className: "gm-sub-badge gm-sub-badge-ok", style: { flex: "none" } }, "Worktree 作用域"),
         React.createElement("span", { className: "gm-wt-scope-path", title: wtScope.path }, wtScope.path),
-        ((status && status.branch) || wtScope.branch) ? React.createElement("span", { className: "gm-repogroup-branch" }, (status && status.branch) || wtScope.branch) : null,
+        ((status && status.branch) || wtScope.branch) ? React.createElement("span", { className: "gm-repogroup-branch", title: "分支：" + ((status && status.branch) || wtScope.branch) }, (status && status.branch) || wtScope.branch) : null,
         React.createElement("span", { style: { flex: 1 } }),
         React.createElement("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)", whiteSpace: "nowrap" } }, "变更 / 提交 / 分支操作均作用于该 worktree"),
         React.createElement("button", { className: "gm-btn", onClick: exitWorktree, title: "退出 worktree 作用域，回到面板主仓库" }, "返回主仓库"),
